@@ -1,6 +1,14 @@
 package com.openband.app
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.openband.app.ui.studio
+import com.openband.app.ui.pressable
+import com.openband.app.ui.AppIcons
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.togetherWith
 import android.os.Bundle
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.compose.runtime.SideEffect
@@ -24,10 +32,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import com.openband.app.ui.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.openband.app.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -74,6 +82,34 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.BLACK),
         )
         runCatching { BandService.start(this) } // only does something in "always connected" mode
+        // every time the app comes to the front, pick up what the Pebble app has saved since last time
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            private var last = 0L
+            override fun onResume(owner: androidx.lifecycle.LifecycleOwner) {
+                if (System.currentTimeMillis() - last < 60_000) return
+                last = System.currentTimeMillis()
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    runCatching {
+                        com.openband.app.health.HealthRepo(applicationContext).import(quick = true)
+                        com.openband.app.widget.WidgetUpdater.updateAll(applicationContext)
+                    }
+                }
+            }
+        })
+        runCatching { com.openband.app.live.LiveService.createChannels(this) }
+        // Android 13+: the always-on notification needs this permission (asked once)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            val asked = getSharedPreferences("live", MODE_PRIVATE)
+            if (!asked.getBoolean("asked_notif", false)) {
+                asked.edit().putBoolean("asked_notif", true).apply()
+                registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {
+                    runCatching { com.openband.app.live.LiveService.sync(this) }
+                }.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        runCatching { com.openband.app.live.LiveService.sync(this) }
         val crash = CrashLog.read(this)
         setContent {
             OpenBandTheme {
@@ -90,7 +126,7 @@ class MainActivity : ComponentActivity() {
                 var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
                 var crashText by remember { mutableStateOf(crash) }
                 BackHandler(enabled = lab) { lab = false }
-                BackHandler(enabled = !lab && detail != null) { detail = null }
+                BackHandler(enabled = !lab && detail != null) { detail = detail?.substringBeforeLast('|', "")?.ifEmpty { null } }
                 BackHandler(enabled = !lab && detail == null && tab == 4 && settingsPage != null) { settingsPage = null }
                 BackHandler(enabled = !lab && detail == null && tab != 0 && !(tab == 4 && settingsPage != null)) { tab = 0 }
 
@@ -98,15 +134,38 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1f).fillMaxWidth().statusBarsPadding()) {
                             val m = Modifier
-                            androidx.compose.runtime.CompositionLocalProvider(com.openband.app.ui.LocalOpenMetric provides { id: String -> detail = id }) {
-                                if (lab) LabScreen(m, onBack = { lab = false })
-                                else if (detail != null) com.openband.app.ui.MetricDetailScreen(detail!!, m, onBack = { detail = null })
-                                else when (tab) {
-                                    0 -> HomeScreen(m, onOpenBand = { settingsPage = "band"; tab = 4 }, onOpenHealth = { settingsPage = "health"; tab = 4 })
-                                    1 -> com.openband.app.ui.SportsScreen(m)
-                                    2 -> HistoryScreen(m)
-                                    3 -> com.openband.app.ui.ProfileScreen(m)
-                                    4 -> com.openband.app.ui.SettingsScreen(m, settingsPage, { settingsPage = it }, onOpenLab = { lab = true })
+                            // pages stack on each other ("a|b"); Back removes the top one
+                            androidx.compose.runtime.CompositionLocalProvider(com.openband.app.ui.LocalOpenMetric provides { id: String -> detail = detail?.let { "$it|$id" } ?: id }) {
+                                // keeps each screen's tab choice and scroll position while a page is open over it
+                                val holder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+                                // screens fade + slide in; the outgoing one fades out using the state it was shown with
+                                val screenKey = listOf(lab, detail, tab, if (tab == 4) settingsPage else null)
+                                androidx.compose.animation.AnimatedContent(
+                                    targetState = screenKey,
+                                    transitionSpec = {
+                                        (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(240, delayMillis = 60)) +
+                                            androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(300)) { it / 28 }) togetherWith
+                                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120))
+                                    },
+                                    label = "screen",
+                                ) { key ->
+                                    val kLab = key[0] as Boolean
+                                    val kDetail = key[1] as String?
+                                    val kTab = key[2] as Int
+                                    holder.SaveableStateProvider(key.joinToString("/") { it.toString() }) {
+                                    val top = kDetail?.substringAfterLast('|')
+                                    val pop = { detail = kDetail?.substringBeforeLast('|', "")?.ifEmpty { null } }
+                                    if (kLab) LabScreen(m, onBack = { lab = false })
+                                    else if (top != null && top.startsWith("page:")) com.openband.app.ui.PageScreen(top, m, onBack = pop)
+                                    else if (top != null) com.openband.app.ui.MetricDetailScreen(top, m, onBack = pop)
+                                    else when (kTab) {
+                                        0 -> HomeScreen(m, onOpenBand = { settingsPage = "band"; tab = 4 }, onOpenHealth = { settingsPage = "health"; tab = 4 })
+                                        1 -> com.openband.app.ui.SportsScreen(m)
+                                        2 -> HistoryScreen(m)
+                                        3 -> com.openband.app.ui.ProfileScreen(m)
+                                        4 -> com.openband.app.ui.SettingsScreen(m, key[3] as String?, { settingsPage = it }, onOpenLab = { lab = true })
+                                    }
+                                    }
                                 }
                             }
                         }
@@ -143,23 +202,51 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    /** Standard bottom bar: five equal tabs, icon + label always visible, selected tab in the accent colour. */
+    @Composable
+    private fun StudioNavBar(labels: List<String>, icons: List<ImageVector>, selected: Int, onSelect: (Int) -> Unit) {
+        val look = LocalRace.current
+        Column(Modifier.fillMaxWidth().background(look.panel)) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(look.border))
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp)) {
+                labels.forEachIndexed { i, label ->
+                    val sel = i == selected
+                    val col by androidx.compose.animation.animateColorAsState(if (sel) look.primary else look.dim, androidx.compose.animation.core.tween(160), label = "tab")
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().pressable { onSelect(i) },
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(Modifier.width(if (sel) 28.dp else 0.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(look.primary))
+                        Spacer(Modifier.height(if (sel) 5.dp else 8.dp))
+                        Icon(icons[i], label, Modifier.size(24.dp), tint = col)
+                        Text(label, color = col, fontSize = 11.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+            }
+        }
+    }
+
     @Composable
     private fun RaceNavBar(selected: Int, onSelect: (Int) -> Unit) {
         val look = LocalRace.current
         val n = look.names
         val labels = listOf(n.dash, n.sport, n.history, n.profile, n.settings)
-        val icons: List<ImageVector> = when (look.style) {
+        if (look.style.studio) {
+            StudioNavBar(labels, listOf(AppIcons.Home, AppIcons.Activity, AppIcons.Trends, AppIcons.Profile, AppIcons.Settings), selected, onSelect)
+            return
+        }
+        val icons: List<ImageVector> = when (look.family) {
             UiStyle.RACING, UiStyle.CYBER -> listOf(RaceIcons.Gauge, RaceIcons.Bolt, RaceIcons.Flag, RaceIcons.Helmet, RaceIcons.Wheel)
             else -> listOf(Icons.Filled.Home, RaceIcons.Bolt, Icons.Filled.DateRange, Icons.Filled.Person, Icons.Filled.Settings)
         }
-        val barBg = when (look.style) {
+        val barBg = when (look.family) {
             UiStyle.CLEAN -> Modifier.background(look.panel)
-            UiStyle.RINGS -> Modifier.background(Color.Black)
+            UiStyle.RINGS -> Modifier.background(look.bg)
             else -> Modifier.background(Brush.verticalGradient(listOf(look.panel.copy(alpha = 0.96f), Color.Black)))
         }
         Column(Modifier.fillMaxWidth().then(barBg)) {
-            if (look.style == UiStyle.CYBER) Box(Modifier.fillMaxWidth().height(1.dp).background(look.primary.copy(alpha = 0.6f)))
-            if (look.style == UiStyle.CLEAN) Box(Modifier.fillMaxWidth().height(1.dp).background(look.border))
+            if (look.family == UiStyle.CYBER) Box(Modifier.fillMaxWidth().height(1.dp).background(look.primary.copy(alpha = 0.6f)))
+            if (look.family == UiStyle.CLEAN) Box(Modifier.fillMaxWidth().height(1.dp).background(look.border))
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 6.dp)) {
                 labels.forEachIndexed { i, label ->
                     val sel = i == selected
@@ -167,7 +254,7 @@ class MainActivity : ComponentActivity() {
                         Modifier.weight(1f).clickable { onSelect(i) }.padding(vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        when (look.style) {
+                        when (look.family) {
                             UiStyle.RACING, UiStyle.CYBER -> {
                                 Box(Modifier.width(28.dp).height(3.dp).background(if (sel) look.primary else Color.Transparent))
                                 Spacer(Modifier.height(5.dp))
@@ -180,10 +267,10 @@ class MainActivity : ComponentActivity() {
                         }
                         Text(
                             if (look.upperTitles) label.uppercase() else label,
-                            fontFamily = if (look.style == UiStyle.RACING) look.display else look.body,
+                            fontFamily = if (look.family == UiStyle.RACING) look.display else look.body,
                             fontStyle = if (look.italicTitles) FontStyle.Italic else FontStyle.Normal,
                             fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = if (look.style == UiStyle.RACING) 9.sp else 11.sp,
+                            fontSize = if (look.family == UiStyle.RACING) 9.sp else 11.sp,
                             color = if (sel) look.text else look.dim, maxLines = 1,
                         )
                     }

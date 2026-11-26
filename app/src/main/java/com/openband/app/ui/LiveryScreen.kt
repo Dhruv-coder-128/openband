@@ -1,5 +1,6 @@
 package com.openband.app.ui
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,10 +23,7 @@ import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,7 +55,7 @@ fun AppearanceContent() {
         SectionCard("App style") {
             Text("Changes colours, fonts, layout and screen names.", style = MaterialTheme.typography.bodySmall, color = look.dim)
             Spacer(Modifier.height(8.dp))
-            UiStyle.entries.chunked(2).forEach { row ->
+            UiStyle.entries.sortedByDescending { it.studio }.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { st -> StyleCard(st, st == p.uiStyle, Modifier.weight(1f)) { RaceSettings.setStyle(st) } }
                 }
@@ -66,25 +64,33 @@ fun AppearanceContent() {
 
 
         // ---------------------------------------------------------------- colours
-        SectionCard("Colours") {
+        SectionCard(if (p.uiStyle.studio) "Accent colour" else "Colours") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 liveriesFor(p.uiStyle).forEach { l ->
                     val sel = p.livery == l.id && p.customPrimary == null && p.customSecondary == null
                     LiveryChip(l, sel) { RaceSettings.update { it.copy(livery = l.id, customPrimary = null, customSecondary = null) } }
                 }
             }
+            if (!p.uiStyle.studio) Column {
             Spacer(Modifier.height(12.dp))
             Label("Custom main colour")
             ColorRow(p.primary) { c -> RaceSettings.update { it.copy(customPrimary = c.toStored()) } }
             Spacer(Modifier.height(8.dp))
             Label("Custom accent")
             ColorRow(p.secondary) { c -> RaceSettings.update { it.copy(customSecondary = c.toStored()) } }
+            }
         }
 
 
         // ---------------------------------------------------------------- style-specific options
         SectionCard("Look & feel") {
-            when (p.uiStyle) {
+            if (p.uiStyle == UiStyle.MIDNIGHT) {
+                Text("Midnight is always true black.", style = MaterialTheme.typography.bodySmall, color = look.dim)
+            } else if (p.uiStyle.studio) {
+                Label("Appearance")
+                Choice(listOf("Auto", "Light", "Dark"), p.appearance) { i -> RaceSettings.update { it.copy(appearance = i) } }
+                Text("Auto follows your phone's light / dark setting.", style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 4.dp))
+            } else when (p.uiStyle.family) {
                 UiStyle.RACING -> {
                     Label("Gauge style")
                     Choice(GaugeStyle.entries.map { it.label }, p.gaugeStyle.ordinal) { i -> RaceSettings.update { it.copy(gaugeStyle = GaugeStyle.entries[i]) } }
@@ -93,17 +99,19 @@ fun AppearanceContent() {
                     Toggle("Carbon-fibre background", p.carbon) { v -> RaceSettings.update { it.copy(carbon = v) } }
                 }
                 UiStyle.CYBER -> Toggle("Scanlines", p.scanlines) { v -> RaceSettings.update { it.copy(scanlines = v) } }
-                UiStyle.CLEAN -> Toggle("Light mode", p.lightMode) { v -> RaceSettings.update { it.copy(lightMode = v) } }
-                UiStyle.RINGS -> Text(
-                    "Recovery = HRV + resting heart rate + sleep (estimate). Effort = steps / calories vs your goals.",
+                UiStyle.CLEAN -> if (p.uiStyle == UiStyle.CLEAN) Toggle("Light mode", p.lightMode) { v -> RaceSettings.update { it.copy(lightMode = v) } }
+                else Text("This look is always light and warm.", style = MaterialTheme.typography.bodySmall, color = look.dim)
+                else -> Text(
+                    "Three rings: sleep, steps and calories against your goals (set them under Goals & units).",
                     style = MaterialTheme.typography.bodySmall, color = look.dim,
                 )
             }
             Spacer(Modifier.height(6.dp))
-            Label("Font")
-            Choice(FontStyle.entries.map { it.label }, p.font.ordinal) { i -> RaceSettings.update { it.copy(font = FontStyle.entries[i]) } }
+            Spacer(Modifier.height(4.dp))
+            AppDropdown(FontStyle.entries.map { it.label }, p.font.ordinal, { i -> RaceSettings.update { it.copy(font = FontStyle.entries[i]) } }, label = "Font")
+            Spacer(Modifier.height(8.dp))
             Toggle("Animations", p.animate) { v -> RaceSettings.update { it.copy(animate = v) } }
-            if (p.uiStyle != UiStyle.RINGS && !(p.uiStyle == UiStyle.CLEAN && p.lightMode))
+            if (!p.uiStyle.studio && p.uiStyle.family != UiStyle.RINGS && !(p.uiStyle == UiStyle.CLEAN && p.lightMode) && p.uiStyle != UiStyle.PAPER)
                 Toggle("Pure black (saves battery)", p.oled) { v -> RaceSettings.update { it.copy(oled = v) } }
         }
 
@@ -125,7 +133,7 @@ fun DashboardContent() {
         SectionCard("Dashboard") {
             Toggle("Hide metrics without data", p.hideEmpty) { v -> RaceSettings.update { it.copy(hideEmpty = v) } }
             Text(
-                "Turn metrics on or off and move them up or down." + if (p.uiStyle == UiStyle.RACING) " The top two become the big gauges." else "",
+                "Turn metrics on or off and move them up or down." + if (p.uiStyle.family == UiStyle.RACING) " The top two become the big gauges." else "",
                 style = MaterialTheme.typography.bodySmall, color = look.dim,
             )
             Spacer(Modifier.height(6.dp))
@@ -161,6 +169,13 @@ fun GoalsContent() {
         // ---------------------------------------------------------------- goals & units
         SectionCard("Goals") {
             Slide("Steps", p.stepGoal.toFloat(), 2000f..30000f, "%,d".format(p.stepGoal)) { v -> RaceSettings.update { it.copy(stepGoal = (v / 500).roundToInt() * 500) } }
+            Text("Calories shown", style = MaterialTheme.typography.bodyMedium, color = look.text, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+            Choice(listOf("Like Pebble", "Like Whoop"), if (p.calTotal) 1 else 0) { i -> RaceSettings.update { it.copy(calTotal = i == 1) } }
+            Text(
+                if (p.calTotal) "Total energy: your resting burn (from age, height, weight, sex) plus activity. Higher than the Pebble app."
+                else "Activity calories only, the same number the Pebble app shows.",
+                style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
             Slide("Active calories", p.calGoal.toFloat(), 100f..2000f, "${p.calGoal} kcal") { v -> RaceSettings.update { it.copy(calGoal = (v / 50).roundToInt() * 50) } }
             Slide("Sleep", p.sleepGoalMin.toFloat(), 300f..660f, Stats.fmtMinutes(p.sleepGoalMin.toDouble())) { v -> RaceSettings.update { it.copy(sleepGoalMin = (v / 15).roundToInt() * 15) } }
         }
@@ -185,7 +200,7 @@ fun ProfileFields() {
             var name by remember { mutableStateOf(p.driverName) }
             var num by remember { mutableStateOf(p.carNumber) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (look.style == UiStyle.RACING) OutlinedTextField(
+                if (look.family == UiStyle.RACING) OutlinedTextField(
                     value = num, onValueChange = { v -> num = v.filter { it.isLetterOrDigit() }.take(3); RaceSettings.update { it.copy(carNumber = num.ifBlank { "0" }) } },
                     label = { Text("No.") }, singleLine = true, modifier = Modifier.width(90.dp),
                 )
@@ -201,6 +216,12 @@ fun ProfileFields() {
         SectionCard("Body") {
             Slide("Weight (for calories)", p.weightKg.toFloat(), 35f..160f, "${p.weightKg} kg") { v -> RaceSettings.update { it.copy(weightKg = v.roundToInt()) } }
             Slide("Height", p.heightCm.toFloat(), 120f..220f, "${p.heightCm} cm") { v -> RaceSettings.update { it.copy(heightCm = v.roundToInt()) } }
+            Text("Sex (for resting calories)", style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1 to "Male", 2 to "Female", 0 to "Not set").forEach { (v, l) ->
+                    FilterChip(selected = p.sex == v, onClick = { RaceSettings.update { it.copy(sex = v) } }, label = { Text(l) })
+                }
+            }
         }
     }
 }
@@ -237,6 +258,11 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
     val fg: Color
     val shape = when (st) {
         UiStyle.RACING, UiStyle.CYBER -> CutCornerShape(topEnd = 14.dp, bottomStart = 14.dp)
+        UiStyle.STUDIO -> RoundedCornerShape(16.dp)
+        UiStyle.MIDNIGHT -> RoundedCornerShape(20.dp)
+        UiStyle.BOLD -> RoundedCornerShape(24.dp)
+        UiStyle.MONO -> RoundedCornerShape(4.dp)
+        UiStyle.PAPER -> RoundedCornerShape(10.dp)
         else -> RoundedCornerShape(18.dp)
     }
     when (st) {
@@ -244,6 +270,11 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
         UiStyle.CYBER -> { bg = Color(0xFF0B0716); fg = Color(0xFFEAF6FF) }
         UiStyle.RINGS -> { bg = Color.Black; fg = Color.White }
         UiStyle.CLEAN -> { bg = Color(0xFFF4F5F7); fg = Color(0xFF15181B) }
+        UiStyle.PAPER -> { bg = Color(0xFFF5F1EA); fg = Color(0xFF1B1A17) }
+        UiStyle.STUDIO -> { bg = Color(0xFFF4F3EF); fg = Color(0xFF17181A) }
+        UiStyle.MIDNIGHT -> { bg = Color.Black; fg = Color(0xFFE9EAEE) }
+        UiStyle.BOLD -> { bg = Color(0xFFF4F3EF); fg = Color(0xFF17181A) }
+        UiStyle.MONO -> { bg = Color.White; fg = Color(0xFF0A0A0A) }
     }
     Column(
         modifier.clip(shape).background(bg).border(if (selected) 2.5.dp else 1.dp, if (selected) look.primary else Color(0xFF3A3F48), shape)
@@ -278,6 +309,38 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
                         drawArc(c, -90f, 120f + 70f * k, false, Offset(cx - r, h / 2 - r), Size(r * 2, r * 2), style = Stroke(6f))
                     }
                 }
+                UiStyle.PAPER -> {
+                    drawLine(Color(0xFF1B1A17), Offset(0f, h * 0.22f), Offset(size.width * 0.55f, h * 0.22f), 5f)
+                    drawLine(Color(0xFFD9D2C3), Offset(0f, h * 0.5f), Offset(size.width, h * 0.5f), 2f)
+                    drawLine(Color(0xFFD9D2C3), Offset(0f, h * 0.7f), Offset(size.width * 0.8f, h * 0.7f), 2f)
+                    drawCircle(pal.secondary, 9f, Offset(size.width * 0.9f, h * 0.22f))
+                }
+                UiStyle.MIDNIGHT -> {
+                    drawRoundRect(Color(0xFF0D0E11), Offset(0f, 0f), Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(18f))
+                    val r = h * 0.34f
+                    drawCircle(pal.primary.copy(alpha = 0.18f), r, Offset(h * 0.55f, h * 0.5f), style = Stroke(7f))
+                    drawArc(pal.primary, -90f, 250f, false, Offset(h * 0.55f - r, h * 0.5f - r), Size(r * 2, r * 2), style = Stroke(7f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    for (k in 0..5) drawRoundRect(pal.primary.copy(alpha = if (k == 5) 1f else 0.4f), Offset(h * 1.15f + k * 18f, h * (0.75f - 0.08f * ((k * 3) % 5))), Size(10f, h * (0.12f + 0.08f * ((k * 3) % 5))), androidx.compose.ui.geometry.CornerRadius(4f))
+                }
+                UiStyle.BOLD -> {
+                    drawRoundRect(pal.primary, Offset(0f, 0f), Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(24f))
+                    drawRoundRect(Color.White, Offset(14f, h * 0.2f), Size(size.width * 0.42f, h * 0.34f), androidx.compose.ui.geometry.CornerRadius(6f))
+                    drawRoundRect(Color.White.copy(alpha = 0.3f), Offset(14f, h * 0.72f), Size(size.width - 28f, 8f), androidx.compose.ui.geometry.CornerRadius(4f))
+                    drawRoundRect(Color.White, Offset(14f, h * 0.72f), Size((size.width - 28f) * 0.68f, 8f), androidx.compose.ui.geometry.CornerRadius(4f))
+                }
+                UiStyle.MONO -> {
+                    drawRect(Color(0xFF0A0A0A), Offset(1f, 1f), Size(size.width - 2f, h - 2f), style = Stroke(2f))
+                    drawRect(Color(0xFF0A0A0A), Offset(14f, h * 0.22f), Size(size.width * 0.4f, h * 0.3f))
+                    drawCircle(pal.primary, 8f, Offset(size.width - 22f, h * 0.3f))
+                    for (k in 0 until 14) drawRect(Color(0xFF0A0A0A), Offset(14f + k * (size.width - 28f) / 14f, h * 0.68f), Size((size.width - 28f) / 22f, h * 0.2f))
+                }
+                UiStyle.STUDIO -> {
+                    drawRoundRect(Color.White, Offset(0f, 0f), Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(14f))
+                    drawCircle(pal.primary.copy(alpha = 0.18f), h * 0.34f, Offset(h * 0.55f, h * 0.5f), style = Stroke(7f))
+                    drawArc(pal.primary, -90f, 230f, false, Offset(h * 0.55f - h * 0.34f, h * 0.5f - h * 0.34f), Size(h * 0.68f, h * 0.68f), style = Stroke(7f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    drawRoundRect(Color(0xFF17181A), Offset(h * 1.15f, h * 0.30f), Size(size.width * 0.38f, 6f), androidx.compose.ui.geometry.CornerRadius(3f))
+                    drawRoundRect(Color(0xFFD9D7CF), Offset(h * 1.15f, h * 0.55f), Size(size.width * 0.5f, 5f), androidx.compose.ui.geometry.CornerRadius(3f))
+                }
                 UiStyle.CLEAN -> {
                     val w = (size.width - 8f) / 2
                     for (k in 0..1) {
@@ -289,7 +352,7 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
         }
         Spacer(Modifier.height(8.dp))
         Text(st.label, color = fg, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text(st.blurb, color = fg.copy(alpha = 0.6f), fontSize = 11.sp, maxLines = 2)
+        Text(st.blurb, color = fg.copy(alpha = 0.6f), fontSize = 11.sp, lineHeight = 14.sp, maxLines = 3, minLines = 3)
     }
 }
 

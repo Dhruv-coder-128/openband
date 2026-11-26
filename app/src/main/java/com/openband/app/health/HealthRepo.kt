@@ -28,7 +28,9 @@ import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Length
 import androidx.health.connect.client.units.Percentage
 import androidx.health.connect.client.units.Temperature
+import com.openband.app.data.Calories
 import com.openband.app.data.Db
+import com.openband.app.data.Workout
 import com.openband.app.data.M
 import com.openband.app.data.SOURCE_BAND
 import com.openband.app.data.Sample
@@ -111,12 +113,13 @@ class HealthRepo(private val ctx: Context) {
     private fun Instant.ms() = toEpochMilli()
 
     /** Imports all data. First run: 30 days back (or 365 if history permission). Later: since last run - 2 days. */
-    suspend fun import(fullDays: Int? = null): String {
+    suspend fun import(fullDays: Int? = null, quick: Boolean = false): String {
         if (!available()) return "Health Connect not available"
         val granted = granted()
         if (granted.isEmpty()) return "No Health Connect permission granted"
         val end = Instant.now()
         val start = when {
+            quick -> end.minus(Duration.ofHours(12))
             fullDays != null -> end.minus(Duration.ofDays(fullDays.toLong()))
             lastImport == 0L -> end.minus(
                 Duration.ofDays(if (HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted) 365 else 30)
@@ -188,6 +191,9 @@ class HealthRepo(private val ctx: Context) {
             }
         }
 
+        runCatching { importExternalWorkouts(if (quick) 3 else 30) }.onFailure { Log.w(TAG, "workouts", it) }
+        runCatching { alignWorkoutCalories() }.onFailure { Log.w(TAG, "workout calories", it) }
+        if (quick) return counts.entries.joinToString(", ") { "${it.key}: ${it.value}" }
         lastImport = end.toEpochMilli()
         val report = buildString {
             append(if (counts.isEmpty()) "No new data" else counts.entries.joinToString(", ") { "${it.key}: ${it.value}" })
@@ -198,6 +204,142 @@ class HealthRepo(private val ctx: Context) {
     }
 
     private fun minutes(a: Instant, b: Instant) = Duration.between(a, b).seconds / 60.0
+
+    /**
+     * In "like Pebble" mode, workouts that were saved with the heart-rate formula (much higher than the Pebble app) get
+     * the band's own basis instead: their share of that day's activity calories, by steps.
+     */
+    private fun alignWorkoutCalories() {
+        val p = com.openband.app.ui.RaceSettings.prefs.value
+        if (p.calTotal) return
+        for (w in db.workouts(100)) {
+            if (w.imported || w.steps < 500) continue
+            val formula = Calories.fromHr(w.hr, (w.movingMs / 1000).toInt(), p) ?: continue
+            if (Math.abs(w.kcal - formula) > formula * 0.05) continue
+            val date = Instant.ofEpochMilli(w.start).atZone(zone).toLocalDate()
+            val from = com.openband.app.data.Stats.dayStart(date); val to = com.openband.app.data.Stats.dayStart(date.plusDays(1))
+            val daySteps = com.openband.app.data.Stats.total(db, M.STEPS, from, to) ?: continue
+            val dayKcal = com.openband.app.data.Stats.total(db, M.CALORIES, from, to) ?: continue
+            if (daySteps < w.steps) continue
+            val share = dayKcal * w.steps / daySteps
+            if (share > 20) db.updateWorkoutKcal(w.id, share)
+        }
+    }
+
+    private class Cand(val ext: String, val sport: String, val start: Long, val end: Long, val src: String, val steps: Int?)
+
+    private fun sportOf(t: Int): String = when (t) {
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING -> "run"
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> "treadmill"
+        ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> "walk"
+        ExerciseSessionRecord.EXERCISE_TYPE_HIKING -> "hike"
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING -> "bike"
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY -> "spin"
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL, ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER -> "swim"
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING, ExerciseSessionRecord.EXERCISE_TYPE_ROWING_MACHINE -> "row"
+        ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING, ExerciseSessionRecord.EXERCISE_TYPE_WEIGHTLIFTING -> "strength"
+        ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING -> "hiit"
+        ExerciseSessionRecord.EXERCISE_TYPE_YOGA -> "yoga"
+        ExerciseSessionRecord.EXERCISE_TYPE_PILATES -> "pilates"
+        ExerciseSessionRecord.EXERCISE_TYPE_STRETCHING -> "stretch"
+        ExerciseSessionRecord.EXERCISE_TYPE_STAIR_CLIMBING, ExerciseSessionRecord.EXERCISE_TYPE_STAIR_CLIMBING_MACHINE -> "stairs"
+        ExerciseSessionRecord.EXERCISE_TYPE_ELLIPTICAL -> "elliptical"
+        ExerciseSessionRecord.EXERCISE_TYPE_DANCING -> "dance"
+        ExerciseSessionRecord.EXERCISE_TYPE_BOXING -> "boxing"
+        ExerciseSessionRecord.EXERCISE_TYPE_MARTIAL_ARTS -> "martial"
+        ExerciseSessionRecord.EXERCISE_TYPE_FOOTBALL_AMERICAN, ExerciseSessionRecord.EXERCISE_TYPE_SOCCER -> "football"
+        ExerciseSessionRecord.EXERCISE_TYPE_CRICKET -> "cricket"
+        ExerciseSessionRecord.EXERCISE_TYPE_BADMINTON -> "badminton"
+        ExerciseSessionRecord.EXERCISE_TYPE_TENNIS -> "tennis"
+        ExerciseSessionRecord.EXERCISE_TYPE_TABLE_TENNIS -> "tabletennis"
+        ExerciseSessionRecord.EXERCISE_TYPE_BASKETBALL -> "basketball"
+        ExerciseSessionRecord.EXERCISE_TYPE_VOLLEYBALL -> "volleyball"
+        ExerciseSessionRecord.EXERCISE_TYPE_GOLF -> "golf"
+        ExerciseSessionRecord.EXERCISE_TYPE_ROCK_CLIMBING -> "climb"
+        ExerciseSessionRecord.EXERCISE_TYPE_SKATING -> "skate"
+        else -> "other"
+    }
+
+    /**
+     * Brings workouts done with another app (the Pebble app) into the workout history. Two sources:
+     *  1. exercise sessions the app wrote to Health Connect;
+     *  2. a step record with a free-running start/end (not on a whole minute) lasting 8 min - 4 h at walking/running pace,
+     *     which is how the Pebble app stores a session recorded on the band.
+     * Everything is derived from data already in the local database; nothing is sent to the band.
+     */
+    suspend fun importExternalWorkouts(days: Int = 30): Int {
+        if (!available()) return 0
+        val g = granted()
+        val own = ctx.packageName
+        val end = Instant.now()
+        val start = end.minus(Duration.ofDays(days.toLong()))
+        val cands = ArrayList<Cand>()
+        // only the Pebble app's own sessions: Google Fit & co. auto-detect "rides" while you sit in a car, which would be noise
+        fun pebble(pkg: String) = pkg.contains("pebble", ignoreCase = true)
+        db.deleteImportedExcept("Pebble")
+        if (HealthPermission.getReadPermission(ExerciseSessionRecord::class) in g) {
+            for (r in readAll(ExerciseSessionRecord::class, start, end).filter { src(it) != own && pebble(src(it)) }) {
+                if (Duration.between(r.startTime, r.endTime).toMinutes() < 3) continue
+                cands += Cand("hc:${r.metadata.id}", sportOf(r.exerciseType), r.startTime.ms(), r.endTime.ms(), src(r), null)
+            }
+        }
+        if (HealthPermission.getReadPermission(StepsRecord::class) in g) {
+            for (r in readAll(StepsRecord::class, start, end)) {
+                if (src(r) == own || !pebble(src(r))) continue
+                val mins = Duration.between(r.startTime, r.endTime).seconds / 60.0
+                if (mins < 8 || mins > 240 || r.count < 300) continue
+                val z = r.startTime.atZone(zone); val ze = r.endTime.atZone(zone)
+                if (z.second == 0 && ze.second == 0) continue            // regular bins start and end on whole minutes
+                val spm = r.count / mins
+                if (spm < 50) continue
+                if (cands.any { it.start < r.endTime.ms() && it.end > r.startTime.ms() }) continue
+                cands += Cand("st:${r.startTime.ms()}", if (spm >= 150) "run" else "walk", r.startTime.ms(), r.endTime.ms(), src(r), r.count.toInt())
+            }
+        }
+        if (cands.isEmpty()) return 0
+        val have = db.workouts(500)
+        val p = com.openband.app.ui.RaceSettings.prefs.value
+        var added = 0
+        /** Calories the Pebble app recorded for this time span (records that only partly overlap count pro rata). */
+        fun pebbleKcal(from: Long, to: Long): Double? =
+            db.series(M.TOTAL_CAL, from - 12 * 3_600_000L, to).filter { it.source.contains("pebble", true) && it.endTs > from }
+                .sumOf { r ->
+                    val len = (r.endTs - r.ts).coerceAtLeast(1)
+                    val over = (minOf(r.endTs, to) - maxOf(r.ts, from)).coerceAtLeast(0)
+                    r.value * over / len
+                }.takeIf { it > 5 }
+        for (c in cands) {
+            val old = have.firstOrNull { it.extId == c.ext }
+            if (old != null) {
+                val k = if (p.calTotal) Calories.fromHr(old.hr, ((old.end - old.start) / 1000).toInt(), p) else pebbleKcal(old.start, old.end)
+                if (k != null && Math.abs(k - old.kcal) > 1.5) db.updateWorkoutKcal(old.id, k)
+                continue
+            }
+            if (have.any { !it.imported && Math.abs(it.start - c.start) < 10 * 60_000L }) continue   // recorded in OpenBand itself
+            val steps = c.steps ?: db.series(M.STEPS, c.start - 3_600_000L, c.end).filter { it.source == c.src && it.ts >= c.start - 1000 && it.endTs <= c.end + 1000 }.sumOf { it.value }.toInt()
+            val hrRows = db.series(M.HR, c.start, c.end).filter { it.value in 30.0..230.0 }
+            val step = (hrRows.size / 1200).coerceAtLeast(1)
+            val hr = hrRows.filterIndexed { i, _ -> i % step == 0 }.map { ((it.ts - c.start) / 1000).toInt() to it.value.toInt() }
+            val bpm = hrRows.map { it.value.toInt() }
+            val durSec = ((c.end - c.start) / 1000).toInt()
+            val def = com.openband.app.workout.Sports.byId(c.sport)
+            val dist = db.series(M.DISTANCE, c.start - 1000, c.end).filter { it.source == c.src }.sumOf { it.value }.takeIf { it > 50 }
+                ?: if (def.steps && steps > 0) steps * (p.heightCm / 100.0) * (if (c.sport == "run" || c.sport == "trail") 0.65 else 0.415) else 0.0
+            val kcal = (if (p.calTotal) Calories.fromHr(hr, durSec, p) else pebbleKcal(c.start, c.end))
+                ?: db.series(M.CALORIES, c.start - 3_600_000L, c.end).filter { it.source == c.src && it.ts >= c.start - 1000 }.sumOf { it.value }.takeIf { it > 5 }
+                ?: (def.met * p.weightKg * durSec / 3600.0)
+            val pretty = when (c.src) { "com.pebble.ring.app", "com.pebble.plus" -> "Pebble"; else -> c.src.substringAfterLast('.').replaceFirstChar { it.uppercase() } }
+            db.insertWorkout(
+                Workout(
+                    0, c.sport, c.start, c.end, 0, dist, steps, kcal,
+                    bpm.takeIf { it.isNotEmpty() }?.average()?.toInt() ?: 0, bpm.maxOrNull() ?: 0, bpm.minOrNull() ?: 0, hr, emptyList(), false, pretty, c.ext,
+                )
+            )
+            added++
+        }
+        if (added > 0) Log.i(TAG, "imported $added workout(s) from other apps")
+        return added
+    }
 
     /** One-time fix for v3.1: remove the bogus 32.0 °C band readings from the app and Health Connect. */
     suspend fun cleanupBogusTemperature() {

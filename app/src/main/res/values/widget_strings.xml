@@ -1,0 +1,32 @@
+<resources>
+    <string name="w_steps">Today\'s steps against your goal, in a glowing ring.</string>
+    <string name="wl_steps">Steps ring</string>
+    <string name="w_calories">Active calories burned today against your goal.</string>
+    <string name="wl_calories">Calories ring</string>
+    <string name="w_hr">Latest heart rate with today\'s trend line.</string>
+    <string name="wl_hr">Heart rate</string>
+    <string name="w_hrgraph">Today\'s full heart-rate graph with min, average and max.</string>
+    <string name="wl_hrgraph">Heart rate graph</string>
+    <string name="w_sleep">Last night\'s sleep against your sleep goal.</string>
+    <string name="wl_sleep">Sleep ring</string>
+    <string name="w_sleepstages">Last night\'s deep, light, REM and awake timeline.</string>
+    <string name="wl_sleepstages">Sleep stages</string>
+    <string name="w_spo2">Latest SpO2 on a gauge.</string>
+    <string name="wl_spo2">Blood oxygen</string>
+    <string name="w_hrv">Heart-rate variability with your 7-day trend.</string>
+    <string name="wl_hrv">HRV</string>
+    <string name="w_stress">Latest stress level on a colour gauge.</string>
+    <string name="wl_stress">Stress</string>
+    <string name="w_temp">Latest wrist temperature on a scale.</string>
+    <string name="wl_temp">Skin temperature</string>
+    <string name="w_battery">Your band\'s battery level.</string>
+    <string name="wl_battery">Band battery</string>
+    <string name="w_rings3">Sleep, steps and calories rings side by side.</string>
+    <string name="wl_rings3">Daily rings</string>
+    <string name="w_vitals">Heart rate, SpO2, HRV, stress, temperature and battery at a glance.</string>
+    <string name="wl_vitals">All vitals</string>
+    <string name="w_weeksteps">Seven days of steps with your goal line.</string>
+    <string name="wl_weeksteps">Week of steps</string>
+    <string name="w_streak">Your active-day streak and this week\'s days.</string>
+    <string name="wl_streak">Streak</string>
+</resources>

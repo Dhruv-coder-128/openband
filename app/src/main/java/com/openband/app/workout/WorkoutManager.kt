@@ -11,6 +11,7 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.openband.app.ble.BandManager
 import com.openband.app.ble.LiveKind
+import com.openband.app.data.Calories
 import com.openband.app.data.Db
 import com.openband.app.data.M
 import com.openband.app.data.Stats
@@ -366,6 +367,9 @@ object WorkoutManager {
     }
 
     private fun estimateKcal(def: SportDef, ms: Long): Double {
+        // "like Pebble": the band's own figure; "Whoop style": heart-rate formula. MET estimate when neither is available
+        val prefs = com.openband.app.ui.RaceSettings.prefs.value
+        if (prefs.calTotal) Calories.fromHr(hr.toList(), (ms / 1000).toInt(), prefs)?.let { return it }
         val band = (todayTotal(M.CALORIES) - kcalAtStart).coerceAtLeast(0.0)
         return if (band >= 5.0) band else metKcal(def, ms)
     }

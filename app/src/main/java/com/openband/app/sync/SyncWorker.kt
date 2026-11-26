@@ -19,6 +19,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
     override suspend fun doWork(): Result {
         try {
             runCatching { HealthRepo(applicationContext).import() }
+            runCatching { com.openband.app.widget.WidgetUpdater.updateAll(applicationContext) }
             // short connect -> sync -> release, so the official app keeps working
             runCatching { BandManager.backgroundSync() }
         } catch (_: Throwable) {
@@ -38,6 +39,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         runCatching { BandService.start(context) }
+        runCatching { com.openband.app.live.LiveService.createChannels(context) }
+        runCatching { com.openband.app.live.LiveService.sync(context) }
         runCatching { SyncWorker.schedule(context) }
     }
 }

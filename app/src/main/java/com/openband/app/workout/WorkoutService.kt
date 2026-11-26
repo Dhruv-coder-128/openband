@@ -74,7 +74,7 @@ class WorkoutService : Service() {
                         a.hr?.let { append("  ·  ♥ $it") }
                         if (a.paused) append("  ·  paused")
                     }
-                    runCatching { nm.notify(ID, notification(txt, a.sport.emoji + " " + a.sport.name)) }
+                    runCatching { nm.notify(ID, notification(txt, a.sport.name)) }
                 }
                 delay(2000)
             }

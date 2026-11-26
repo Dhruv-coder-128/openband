@@ -13,12 +13,12 @@ import java.util.Locale
 object Export {
     private val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
 
-    private fun file(ctx: Context, name: String): File {
+    fun file(ctx: Context, name: String): File {
         val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
         return File(dir, name)
     }
 
-    private fun share(ctx: Context, f: File, mime: String) {
+    fun share(ctx: Context, f: File, mime: String) {
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = mime

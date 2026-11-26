@@ -21,12 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -110,14 +106,14 @@ fun BandScreen(modifier: Modifier, onOpenLab: () -> Unit = {}) {
                         Text("Use without the Pebble app", color = look.text, fontWeight = FontWeight.SemiBold)
                         Text("Only if you don't use the Pebble app at all", style = MaterialTheme.typography.labelSmall, color = look.dim)
                     }
-                    androidx.compose.material3.Switch(checked = st.soloAllowed, onCheckedChange = { BandManager.soloAllowed = it })
+                    Switch(checked = st.soloAllowed, onCheckedChange = { BandManager.soloAllowed = it })
                 }
                 if (st.soloAllowed || !BandManager.officialInstalled()) Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Stay connected in background", color = look.text, fontWeight = FontWeight.SemiBold)
                         Text("Off = only while OpenBand is open", style = MaterialTheme.typography.labelSmall, color = look.dim)
                     }
-                    androidx.compose.material3.Switch(checked = st.alwaysOn, onCheckedChange = { BandManager.alwaysOn = it })
+                    Switch(checked = st.alwaysOn, onCheckedChange = { BandManager.alwaysOn = it })
                 } else Text(
                     "OpenBand reads your band only while it is open on screen, and lets go the moment you leave. " +
                         "In the background it stays silent, so the Pebble app is never disturbed. The band stores 7 days, so nothing is lost.",
@@ -166,7 +162,7 @@ fun BandScreen(modifier: Modifier, onOpenLab: () -> Unit = {}) {
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Also show other Bluetooth devices", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = look.dim)
-                androidx.compose.material3.Switch(checked = st.scanAll, onCheckedChange = { BandManager.setScanAll(it) })
+                Switch(checked = st.scanAll, onCheckedChange = { BandManager.setScanAll(it) })
             }
         }
 

@@ -19,13 +19,21 @@ object Stats {
      * instead of adding them, which would double count.
      */
     fun total(db: Db, type: String, from: Long, to: Long): Double? {
-        val rows = db.series(type, from, to)
-        if (rows.isEmpty()) return null
-        val bySource = rows.groupBy { it.source }
-        // the band's own data is the truth (it matches the Pebble app exactly); other sources only fill days the band has no data for
-        bySource[SOURCE_BAND]?.let { return it.sumOf { r -> r.value } }
-        return bySource.values.maxOf { list -> list.sumOf { it.value } }
+        val bySource = db.series(type, from, to).groupBy { it.source }
+        fun sum(l: List<Sample>) = l.sumOf { it.value }
+        // The band's counter reaches us two ways: read directly (when OpenBand is open) and through the Pebble app in
+        // Health Connect. Both only grow during a day, so the larger one is simply the fresher one.
+        val own = ArrayList<Double>()
+        bySource[SOURCE_BAND]?.let { own += sum(it) }
+        bySource.filterKeys { isPebble(it) }.values.forEach { own += sum(it) }
+        // the Pebble app stores the band's activity calories as "total calories" in Health Connect
+        if (type == M.CALORIES) db.series(M.TOTAL_CAL, from, to).filter { isPebble(it.source) }.groupBy { it.source }.values.forEach { own += sum(it) }
+        if (own.isNotEmpty()) return own.max()
+        // other sources only fill days the band has no data for
+        return bySource.values.maxOfOrNull { sum(it) }
     }
+
+    fun isPebble(source: String) = source.contains("pebble", ignoreCase = true)
 
     data class MinMaxAvg(val min: Double, val max: Double, val avg: Double, val count: Int)
 
@@ -38,6 +46,8 @@ object Stats {
     fun dayValue(db: Db, type: String, date: LocalDate): Double? {
         val from = dayStart(date)
         val to = dayStart(date.plusDays(1))
+        // total energy = resting + active; the band (and the Pebble app's Health Connect export) only know the active part
+        if (type == M.TOTAL_CAL) return total(db, M.CALORIES, from, to)?.let { Calories.total(it, date) }
         return when (M.info[type]?.agg ?: M.Agg.AVG) {
             M.Agg.SUM -> total(db, type, from, to)
             M.Agg.AVG -> mma(db.series(type, from, to))?.avg

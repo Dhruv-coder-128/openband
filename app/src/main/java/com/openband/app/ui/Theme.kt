@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
@@ -81,6 +82,8 @@ private fun namesFor(s: UiStyle) = when (s) {
     UiStyle.CYBER -> Names("HUD", "Link", "Feed", "Logs", "Mods", "Netrunner lab", "SYNC_NOW", "JACK_IN", "Ops", "Identity", "Sys")
     UiStyle.RINGS -> Names("Overview", "Band", "Health", "Trends", "Profile", "Protocol lab", "Sync", "Pair band", "Sport")
     UiStyle.CLEAN -> Names("Today", "Band", "Health", "History", "Style", "Protocol lab", "Sync now", "Pair band", "Workout")
+    UiStyle.PAPER -> Names("Today", "Band", "Health", "Journal", "Style", "Protocol lab", "Sync now", "Pair band", "Workout", "Profile", "Settings")
+    UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO -> Names("Today", "Band", "Health", "History", "Appearance", "Protocol lab", "Sync now", "Pair band", "Activity", "Profile", "Settings")
 }
 
 /** Everything the UI needs, available anywhere via [LocalRace]. */
@@ -106,9 +109,14 @@ data class RaceLook(
     val buttonShape: Shape,
     val italicTitles: Boolean,
     val upperTitles: Boolean,
+    /** Buttons and chips are near-black / near-white (the OpenBand look) instead of the accent colour. */
+    val inkButtons: Boolean = false,
 ) {
+    /** The layout family this look is built on. */
+    val family: UiStyle get() = style.family
+
     /** Picks the text for the current style. */
-    fun pick(racing: String, plain: String, cyber: String = plain.uppercase().replace(' ', '_')): String = when (style) {
+    fun pick(racing: String, plain: String, cyber: String = plain.uppercase().replace(' ', '_')): String = when (family) {
         UiStyle.RACING -> racing
         UiStyle.CYBER -> cyber
         else -> plain
@@ -132,15 +140,27 @@ private val Rajdhani = FontFamily(
     Font(R.font.rajdhani_bold, FontWeight.Bold),
     Font(R.font.rajdhani_bold, FontWeight.Black),
 )
+@OptIn(ExperimentalTextApi::class)
+private fun variableFamily(res: Int) = FontFamily(
+    Font(res, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(res, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(res, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(res, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+    Font(res, FontWeight.Black, variationSettings = FontVariation.Settings(FontVariation.weight(800))),
+)
+private val SpaceGrotesk = variableFamily(R.font.space_grotesk)
+private val Playfair = variableFamily(R.font.playfair)
+private val Nunito = variableFamily(R.font.nunito)
+private val Inter = variableFamily(R.font.inter)
 private val TechMono = FontFamily(Font(R.font.sharetech_mono, FontWeight.Normal), Font(R.font.sharetech_mono, FontWeight.Bold))
 
-private fun typography(display: FontFamily, body: FontFamily, style: UiStyle): Typography {
+private fun typography(display: FontFamily, body: FontFamily, style: UiStyle, studio: Boolean = false): Typography {
     val t = Typography()
     val heavy = if (style == UiStyle.CLEAN || style == UiStyle.RINGS) FontWeight.Bold else FontWeight.Black
     fun TextStyle.d() = copy(fontFamily = display)
     fun TextStyle.b() = copy(fontFamily = body)
     val bodyScale = if (body == Rajdhani) 1.1f else 1f
-    return t.copy(
+    val base = t.copy(
         displayLarge = t.displayLarge.d(), displayMedium = t.displayMedium.d(), displaySmall = t.displaySmall.d().copy(fontWeight = heavy),
         headlineLarge = t.headlineLarge.d().copy(fontWeight = heavy),
         headlineMedium = t.headlineMedium.d().copy(fontWeight = heavy, fontSize = if (style == UiStyle.RACING) 24.sp else 28.sp, letterSpacing = if (style == UiStyle.RACING) 1.sp else 0.sp),
@@ -158,15 +178,33 @@ private fun typography(display: FontFamily, body: FontFamily, style: UiStyle): T
         labelMedium = t.labelMedium.b().copy(fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, fontSize = 11.5.sp * bodyScale),
         labelSmall = t.labelSmall.b().copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
     )
+    if (!studio) return base
+    // OpenBand look: one calm scale. Numbers are tabular so live values do not jiggle.
+    fun TextStyle.n(size: Int, w: FontWeight, ls: Float = 0f, lh: Int = 0) = copy(fontSize = size.sp, fontWeight = w, letterSpacing = ls.sp, fontFeatureSettings = "tnum", lineHeight = if (lh > 0) lh.sp else this.lineHeight)
+    return base.copy(
+        displayLarge = base.displayLarge.n(48, FontWeight.SemiBold, -1f), displayMedium = base.displayMedium.n(40, FontWeight.SemiBold, -0.8f), displaySmall = base.displaySmall.n(32, FontWeight.SemiBold, -0.5f),
+        headlineLarge = base.headlineLarge.n(30, FontWeight.SemiBold, -0.5f), headlineMedium = base.headlineMedium.n(26, FontWeight.SemiBold, -0.4f, 32), headlineSmall = base.headlineSmall.n(21, FontWeight.SemiBold, -0.2f),
+        titleLarge = base.titleLarge.n(19, FontWeight.SemiBold, -0.1f), titleMedium = base.titleMedium.n(16, FontWeight.SemiBold, 0f, 22), titleSmall = base.titleSmall.n(14, FontWeight.SemiBold),
+        bodyLarge = base.bodyLarge.copy(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal),
+        bodyMedium = base.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
+        bodySmall = base.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
+        labelLarge = base.labelLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        labelMedium = base.labelMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
+        labelSmall = base.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.3.sp),
+    )
 }
 
-private fun lookFor(p: RacePrefs): RaceLook {
+fun lookFor(p: RacePrefs, systemDark: Boolean = true): RaceLook {
     val style = p.uiStyle
     val (autoDisplay, autoBody) = when (style) {
         UiStyle.RACING -> Orbitron to Rajdhani
         UiStyle.CYBER -> Orbitron to TechMono
         UiStyle.RINGS -> FontFamily.SansSerif to FontFamily.SansSerif
         UiStyle.CLEAN -> FontFamily.SansSerif to FontFamily.SansSerif
+        UiStyle.PAPER -> Playfair to FontFamily.SansSerif
+        UiStyle.STUDIO, UiStyle.MIDNIGHT -> Inter to Inter
+        UiStyle.BOLD -> SpaceGrotesk to Inter
+        UiStyle.MONO -> TechMono to Inter
     }
     val (display, body) = when (p.font) {
         FontStyle.AUTO -> autoDisplay to autoBody
@@ -174,7 +212,7 @@ private fun lookFor(p: RacePrefs): RaceLook {
         FontStyle.CLEAN -> FontFamily.SansSerif to FontFamily.SansSerif
         FontStyle.MONO -> TechMono to TechMono
     }
-    val light = style == UiStyle.CLEAN && p.lightMode
+    val light = (style == UiStyle.CLEAN && p.lightMode) || style == UiStyle.PAPER
     val black = p.oled || style == UiStyle.RINGS
     return when (style) {
         UiStyle.RACING -> RaceLook(
@@ -212,6 +250,44 @@ private fun lookFor(p: RacePrefs): RaceLook {
             display = display, body = body, panelShape = RoundedCornerShape(24.dp), buttonShape = RoundedCornerShape(50),
             italicTitles = false, upperTitles = false,
         )
+        UiStyle.PAPER -> RaceLook(
+            p, style, namesFor(style), p.primary, p.secondary,
+            bg = Color(0xFFF5F1EA), panel = Color(0xFFFFFFFF), panelHi = Color(0xFFEFEAE0), border = Color(0xFFE2DBCD),
+            text = Color(0xFF1B1A17), dim = Color(0xFF7A7467), light = true,
+            danger = Color(0xFFC0392B), ok = Color(0xFF2E7D4F), warn = Color(0xFFC77D0A),
+            display = display, body = body, panelShape = RoundedCornerShape(10.dp), buttonShape = RoundedCornerShape(10.dp),
+            italicTitles = false, upperTitles = false,
+        )
+        UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO -> {
+            val night = style == UiStyle.MIDNIGHT
+            val mono = style == UiStyle.MONO
+            val dark = night || when (p.appearance) { 1 -> false; 2 -> true; else -> systemDark }
+            fun pick(d: Long, l: Long) = Color(if (dark) d else l)
+            RaceLook(
+                p, style, namesFor(style),
+                primary = when {
+                    night -> p.primary
+                    mono && p.livery == "ink" && p.customPrimary == null -> pick(0xFFEDEDED, 0xFF111111)
+                    dark -> lerp(p.primary, Color.White, if (style == UiStyle.BOLD) 0.12f else 0.30f)
+                    else -> p.primary
+                },
+                secondary = if (dark && !night) lerp(p.secondary, Color.White, 0.28f) else p.secondary,
+                bg = when { night -> Color.Black; mono -> pick(0xFF000000, 0xFFFFFFFF); else -> pick(0xFF0E0F11, 0xFFF4F3EF) },
+                panel = when { night -> Color(0xFF0D0E11); mono -> pick(0xFF0B0B0B, 0xFFFFFFFF); else -> pick(0xFF17191C, 0xFFFFFFFF) },
+                panelHi = when { night -> Color(0xFF181A1F); mono -> pick(0xFF1A1A1A, 0xFFF0F0F0); else -> pick(0xFF212328, 0xFFEFEDE7) },
+                border = when { night -> Color(0xFF1F2228); mono -> pick(0xFF3A3A3A, 0xFF1A1A1A); style == UiStyle.BOLD -> pick(0xFF24262B, 0xFFE9E7E1); else -> pick(0xFF2A2D32, 0xFFE5E3DC) },
+                text = when { night -> Color(0xFFE9EAEE); mono -> pick(0xFFF2F2F2, 0xFF0A0A0A); else -> pick(0xFFF2F2EF, 0xFF17181A) },
+                dim = when { night -> Color(0xFF8E94A0); mono -> pick(0xFFA0A0A0, 0xFF555555); else -> pick(0xFFA2A6AD, 0xFF5D6066) },
+                light = !dark,
+                danger = pick(0xFFF0697C, 0xFFC0354A),
+                ok = pick(0xFF5CC38E, 0xFF23855A),
+                warn = pick(0xFFE3B85B, 0xFFA9741A),
+                display = display, body = body,
+                panelShape = RoundedCornerShape(when (style) { UiStyle.MONO -> 4.dp; UiStyle.BOLD -> 24.dp; UiStyle.MIDNIGHT -> 20.dp; else -> 16.dp }),
+                buttonShape = RoundedCornerShape(when (style) { UiStyle.MONO -> 2.dp; UiStyle.BOLD, UiStyle.MIDNIGHT -> 50.dp; else -> 12.dp }),
+                italicTitles = false, upperTitles = false, inkButtons = style != UiStyle.BOLD,
+            )
+        }
     }
 }
 
@@ -234,9 +310,10 @@ private fun schemeFor(l: RaceLook): ColorScheme {
 @Composable
 fun OpenBandTheme(content: @Composable () -> Unit) {
     val p by RaceSettings.prefs.collectAsState()
-    val look = remember(p) { lookFor(p) }
+    val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val look = remember(p, sysDark) { lookFor(p, sysDark) }
     CompositionLocalProvider(LocalRace provides look) {
-        MaterialTheme(colorScheme = schemeFor(look), typography = typography(look.display, look.body, look.style)) {
+        MaterialTheme(colorScheme = schemeFor(look), typography = typography(look.display, look.body, look.family, look.style.studio)) {
             // any Text without an explicit colour follows the theme (it used to fall back to black)
             CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides look.text, content = content)
         }
@@ -280,6 +357,8 @@ fun RaceBackground(content: @Composable () -> Unit) {
     val carbon = rememberCarbonBrush()
     Box(Modifier.fillMaxSize().background(look.bg)) {
         when (look.style) {
+            UiStyle.PAPER, UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO -> Unit
+            else -> when (look.family) {
             UiStyle.RACING -> {
                 if (p.carbon && !p.oled) Box(Modifier.fillMaxSize().background(carbon))
                 Box(Modifier.fillMaxWidth().height(200.dp).background(Brush.verticalGradient(listOf(look.primary.copy(alpha = 0.16f), Color.Transparent))))
@@ -304,7 +383,8 @@ fun RaceBackground(content: @Composable () -> Unit) {
                 }
             }
             UiStyle.RINGS -> Unit
-            UiStyle.CLEAN -> Box(Modifier.fillMaxWidth().height(260.dp).background(Brush.verticalGradient(listOf(look.primary.copy(alpha = if (look.light) 0.10f else 0.12f), Color.Transparent))))
+            else -> Box(Modifier.fillMaxWidth().height(260.dp).background(Brush.verticalGradient(listOf(look.primary.copy(alpha = if (look.light) 0.10f else 0.12f), Color.Transparent))))
+            }
         }
         content()
     }
@@ -316,7 +396,7 @@ fun RaceBackground(content: @Composable () -> Unit) {
 fun ScreenTitle(title: String, sub: String? = null) {
     val look = LocalRace.current
     Column(Modifier.padding(top = 14.dp, bottom = 6.dp)) {
-        when (look.style) {
+        when (look.family) {
             UiStyle.RACING -> Row(verticalAlignment = Alignment.CenterVertically) {
                 RaceStripes(look.primary, look.secondary)
                 Spacer(Modifier.width(10.dp))
@@ -330,7 +410,7 @@ fun ScreenTitle(title: String, sub: String? = null) {
             else -> Text(title, style = MaterialTheme.typography.headlineMedium, color = look.text)
         }
         if (sub != null) Text(
-            if (look.style == UiStyle.CYBER) "// " + sub.lowercase() else sub,
+            if (look.family == UiStyle.CYBER) "// " + sub.lowercase() else sub,
             style = MaterialTheme.typography.bodyMedium, color = look.dim,
             modifier = Modifier.padding(start = if (look.style == UiStyle.RACING) 40.dp else 0.dp, top = 2.dp),
         )
@@ -357,10 +437,13 @@ fun SectionCard(title: String?, modifier: Modifier = Modifier, content: @Composa
     val shape = look.panelShape
     val base = modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape)
     val styled = when (look.style) {
+        UiStyle.PAPER -> base.background(look.panel).border(1.dp, look.border, shape)
+        else -> when (look.family) {
         UiStyle.RACING -> base.background(Brush.verticalGradient(listOf(look.panelHi.copy(alpha = 0.92f), look.panel.copy(alpha = 0.95f)))).border(1.dp, look.border, shape)
         UiStyle.CYBER -> base.background(look.panel.copy(alpha = 0.88f)).border(1.dp, look.border, shape)
         UiStyle.RINGS -> base.background(look.panel)
-        UiStyle.CLEAN -> base.background(look.panel).border(1.dp, look.border, shape)
+        else -> base.background(look.panel).border(1.dp, look.border, shape)
+        }
     }
     Box(styled) {
         if (look.style == UiStyle.RACING) Box(Modifier.matchParentSize()) { Box(Modifier.width(4.dp).fillMaxHeight().background(look.primary)) }
@@ -377,11 +460,11 @@ fun SectionCard(title: String?, modifier: Modifier = Modifier, content: @Composa
 @Composable
 fun CardTitle(title: String) {
     val look = LocalRace.current
-    when (look.style) {
+    when (look.family) {
         UiStyle.RACING -> Text(title.uppercase(), style = MaterialTheme.typography.titleMedium, fontStyle = TFontStyle.Italic, color = look.primary)
         UiStyle.CYBER -> Text("// " + title.uppercase(), style = MaterialTheme.typography.titleMedium, color = look.primary)
         UiStyle.RINGS -> Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = look.dim)
-        UiStyle.CLEAN -> Text(title, style = MaterialTheme.typography.titleMedium, color = look.text)
+        else -> Text(title, style = MaterialTheme.typography.titleMedium, color = look.text)
     }
 }
 
@@ -414,20 +497,23 @@ fun RaceButton(text: String, modifier: Modifier = Modifier, primary: Boolean = t
     val onPrimary = if (look.primary.luminance() > 0.55f) Color.Black else Color.White
     val bg = when {
         !enabled -> look.panelHi
-        primary && look.style == UiStyle.CYBER -> look.primary.copy(alpha = 0.16f)
+        look.inkButtons -> if (primary) look.text else Color.Transparent
+        primary && look.family == UiStyle.CYBER -> look.primary.copy(alpha = 0.16f)
         primary -> look.primary
         else -> Color.Transparent
     }
     val borderCol = when {
-        look.style == UiStyle.CYBER -> if (primary) look.primary else look.secondary
+        look.inkButtons -> if (primary) Color.Transparent else look.border
+        look.family == UiStyle.CYBER -> if (primary) look.primary else look.secondary
         primary -> Color.Transparent
-        else -> if (look.style == UiStyle.CLEAN || look.style == UiStyle.RINGS) look.border else look.primary
+        else -> if (look.family == UiStyle.CLEAN || look.family == UiStyle.RINGS) look.border else look.primary
     }
     val fg = when {
         !enabled -> look.dim
-        look.style == UiStyle.CYBER -> if (primary) look.primary else look.secondary
+        look.inkButtons -> if (primary) look.bg else look.text
+        look.family == UiStyle.CYBER -> if (primary) look.primary else look.secondary
         primary -> onPrimary
-        look.style == UiStyle.CLEAN || look.style == UiStyle.RINGS -> look.text
+        look.family == UiStyle.CLEAN || look.family == UiStyle.RINGS -> look.text
         else -> look.primary
     }
     Box(
@@ -436,9 +522,9 @@ fun RaceButton(text: String, modifier: Modifier = Modifier, primary: Boolean = t
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            if (look.upperTitles) text.uppercase() else text, fontFamily = if (look.style == UiStyle.RACING) look.display else look.body,
+            if (look.upperTitles) text.uppercase() else text, fontFamily = if (look.family == UiStyle.RACING) look.display else look.body,
             fontWeight = FontWeight.Bold, fontStyle = if (look.italicTitles) TFontStyle.Italic else TFontStyle.Normal,
-            fontSize = if (look.style == UiStyle.RACING) 13.sp else 15.sp, letterSpacing = if (look.upperTitles) 1.sp else 0.sp, color = fg,
+            fontSize = if (look.family == UiStyle.RACING) 13.sp else 15.sp, letterSpacing = if (look.upperTitles) 1.sp else 0.sp, color = fg,
         )
     }
 }
@@ -497,7 +583,7 @@ fun LineChart(
     Canvas(modifier.fillMaxWidth().height(height).chartPointer { sel = it }) {
         if (grid) {
             for (i in 0..4) { val y = size.height * i / 4f; drawLine(gridCol, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f) }
-            if (look.style == UiStyle.RACING || look.style == UiStyle.CYBER)
+            if (look.family == UiStyle.RACING || look.family == UiStyle.CYBER)
                 for (i in 0..6) { val x = size.width * i / 6f; drawLine(gridCol, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f) }
         }
         if (points.size < 2) return@Canvas
@@ -514,8 +600,8 @@ fun LineChart(
             lastX = x
         }
         val fill = Path().apply { addPath(line); lineTo(lastX, size.height); lineTo(firstX, size.height); close() }
-        drawPath(fill, Brush.verticalGradient(listOf(c.copy(alpha = 0.30f), Color.Transparent)))
-        if (look.style == UiStyle.RACING || look.style == UiStyle.CYBER) drawPath(line, c.copy(alpha = 0.35f), style = Stroke(width = 9f))
+        drawPath(fill, Brush.verticalGradient(listOf(c.copy(alpha = if (look.style.studio) 0.13f else 0.30f), Color.Transparent)))
+        if (look.family == UiStyle.RACING || look.family == UiStyle.CYBER) drawPath(line, c.copy(alpha = 0.35f), style = Stroke(width = 9f))
         drawPath(line, c, style = Stroke(width = 3f))
 
         sel?.let { px ->
@@ -557,7 +643,7 @@ fun Sparkline(values: List<Double?>, modifier: Modifier = Modifier, color: Color
 /** Daily bars. The best (highest) bar uses the secondary colour. Tap, drag or hover to read a bar. */
 @OptIn(ExperimentalTextApi::class)
 @Composable
-fun BarChart(values: List<Double?>, modifier: Modifier = Modifier, tip: ((Int) -> Pair<String, String>)? = null) {
+fun BarChart(values: List<Double?>, modifier: Modifier = Modifier, color: Color? = null, tip: ((Int) -> Pair<String, String>)? = null) {
     val look = LocalRace.current
     val empty = if (look.light) Color(0xFFE5E7EB) else Color(0xFF2A2E35)
     val tm = rememberTextMeasurer()
@@ -571,18 +657,20 @@ fun BarChart(values: List<Double?>, modifier: Modifier = Modifier, tip: ((Int) -
         val picked = sel?.let { (it / slot).toInt().coerceIn(0, values.lastIndex) }
         values.forEachIndexed { i, v ->
             val h = if (v == null) 4f else ((v / max) * (size.height - 4)).toFloat().coerceAtLeast(4f)
+            val flat = look.style.studio && color != null
             val col = when {
                 v == null -> empty
+                flat -> color!!.copy(alpha = if (i == values.lastIndex) 1f else 0.55f)
                 v == max -> look.secondary
                 else -> look.primary
             }
             val x = i * slot + (slot - bw) / 2
             val path = Path().apply {
-                val skew = if (look.style == UiStyle.RACING) bw * 0.25f else 0f
+                val skew = if (look.family == UiStyle.RACING) bw * 0.25f else 0f
                 moveTo(x + skew, size.height - h); lineTo(x + bw, size.height - h)
                 lineTo(x + bw - skew, size.height); lineTo(x, size.height); close()
             }
-            drawPath(path, Brush.verticalGradient(listOf(col, col.copy(alpha = 0.5f)), size.height - h, size.height), alpha = if (picked == null || picked == i) 1f else 0.45f)
+            if (flat) drawPath(path, col, alpha = if (picked == null || picked == i) 1f else 0.45f) else drawPath(path, Brush.verticalGradient(listOf(col, col.copy(alpha = 0.5f)), size.height - h, size.height), alpha = if (picked == null || picked == i) 1f else 0.45f)
         }
         if (picked != null && tip != null) {
             val v = values[picked]

@@ -33,11 +33,14 @@ data class RoutePt(val lat: Double, val lon: Double, val t: Int = 0, val alt: Do
 data class Workout(
     val id: Long, val sport: String, val start: Long, val end: Long, val pausedMs: Long, val distanceM: Double, val steps: Int,
     val kcal: Double, val avgHr: Int, val maxHr: Int, val minHr: Int, val hr: List<Pair<Int, Int>>, val route: List<RoutePt>, val gps: Boolean,
+    /** Where it came from: "" = recorded in OpenBand, otherwise the app name (e.g. "Pebble"). */
+    val source: String = "", val extId: String? = null,
 ) {
+    val imported get() = source.isNotEmpty()
     val movingMs get() = (end - start - pausedMs).coerceAtLeast(0)
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db", null, 2) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db", null, 3) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -69,12 +72,19 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY AUTOINCREMENT, sport TEXT NOT NULL, start_ts INTEGER NOT NULL, " +
                 "end_ts INTEGER NOT NULL, paused_ms INTEGER NOT NULL, distance_m REAL NOT NULL, steps INTEGER NOT NULL, kcal REAL NOT NULL, " +
-                "avg_hr INTEGER NOT NULL, max_hr INTEGER NOT NULL, min_hr INTEGER NOT NULL, hr TEXT NOT NULL, route TEXT NOT NULL, gps INTEGER NOT NULL)"
+                "avg_hr INTEGER NOT NULL, max_hr INTEGER NOT NULL, min_hr INTEGER NOT NULL, hr TEXT NOT NULL, route TEXT NOT NULL, gps INTEGER NOT NULL, " +
+                "source TEXT NOT NULL DEFAULT '', ext_id TEXT)"
         )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_ext ON workouts(ext_id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createWorkouts(db)
+        if (oldVersion in 2..2) {
+            db.execSQL("ALTER TABLE workouts ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE workouts ADD COLUMN ext_id TEXT")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_ext ON workouts(ext_id)")
+        }
     }
 
     // ---------------------------------------------------------------- workouts
@@ -87,15 +97,16 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
             put("hr", w.hr.joinToString(",") { "${it.first}:${it.second}" })
             put("route", w.route.joinToString(";") { "%.6f,%.6f,%d,%.1f".format(java.util.Locale.US, it.lat, it.lon, it.t, it.alt) })
             put("gps", if (w.gps) 1 else 0)
+            put("source", w.source); put("ext_id", w.extId)
         }
-        val id = writableDatabase.insert("workouts", null, cv)
+        val id = writableDatabase.insertWithOnConflict("workouts", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
         changes.value = changes.value + 1
         return id
     }
 
     fun workouts(limit: Int = 200): List<Workout> =
         readableDatabase.rawQuery(
-            "SELECT id, sport, start_ts, end_ts, paused_ms, distance_m, steps, kcal, avg_hr, max_hr, min_hr, hr, route, gps FROM workouts ORDER BY start_ts DESC LIMIT $limit", null
+            "SELECT id, sport, start_ts, end_ts, paused_ms, distance_m, steps, kcal, avg_hr, max_hr, min_hr, hr, route, gps, source, ext_id FROM workouts ORDER BY start_ts DESC LIMIT $limit", null
         ).use { c ->
             buildList {
                 while (c.moveToNext()) add(
@@ -108,11 +119,22 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
                             if (f.size < 2) return@mapNotNull null
                             RoutePt(f[0].toDoubleOrNull() ?: return@mapNotNull null, f[1].toDoubleOrNull() ?: return@mapNotNull null, f.getOrNull(2)?.toIntOrNull() ?: 0, f.getOrNull(3)?.toDoubleOrNull() ?: 0.0)
                         },
-                        c.getInt(13) == 1,
+                        c.getInt(13) == 1, c.getString(14) ?: "", c.getString(15),
                     )
                 )
             }
         }
+
+    /** Removes imported workouts that did not come from [source] (e.g. leftovers of other apps' auto-detected sessions). */
+    fun deleteImportedExcept(source: String) {
+        val n = writableDatabase.delete("workouts", "source<>'' AND source<>?", arrayOf(source))
+        if (n > 0) changes.value = changes.value + 1
+    }
+
+    fun updateWorkoutKcal(id: Long, kcal: Double) {
+        writableDatabase.update("workouts", ContentValues().apply { put("kcal", kcal) }, "id=?", arrayOf(id.toString()))
+        changes.value = changes.value + 1
+    }
 
     fun deleteWorkout(id: Long) {
         writableDatabase.delete("workouts", "id=?", arrayOf(id.toString()))

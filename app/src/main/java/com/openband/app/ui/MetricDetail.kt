@@ -149,6 +149,7 @@ fun metricTitle(id: String) = when (id) {
     M.SPO2 -> "Blood oxygen (SpO2)"
     M.TEMP -> "Skin temperature"
     M.CALORIES -> "Active calories"
+    M.TOTAL_CAL -> "Total calories"
     else -> M.label(id)
 }
 
@@ -161,7 +162,8 @@ private fun about(id: String): Pair<String, String> = when (id) {
     M.TEMP -> "Wrist skin temperature. It is lower than core body temperature and changes with the room - watch for changes against your baseline." to "Look for jumps of +0.5 °C or more above your baseline (fever, illness, cycle)."
     M.STRESS -> "Estimated by the band from heart-rate variability. 1–29 relaxed, 30–59 normal, 60–79 medium, 80+ high." to "Lower is better. Short peaks are normal; long high periods mean you should rest."
     M.STEPS -> "Counted by the band's motion sensor, updated live while the app is open." to "A common goal is 7,000–10,000 steps a day."
-    M.CALORIES -> "Energy burned by movement (not counting your resting metabolism)." to "Depends on body size and activity."
+    M.CALORIES -> "Energy burned by movement, measured by the band (the same figure the Pebble app shows). It leaves out your resting metabolism." to "Depends on body size and activity."
+    M.TOTAL_CAL -> "Everything your body burned: resting energy (Mifflin-St Jeor from your age, height, weight and sex, spread over the day) plus the active energy from the band. This is how Whoop, Noise and Apple Health count calories. Set your sex in Profile for the best accuracy." to "Typical adults burn 1,600-2,600 kcal a day in total."
     M.DISTANCE -> "Estimated from your steps and stride length." to "~0.7–0.8 m per step for most adults."
     M.BATTERY -> "The band's own battery level, read on every sync." to "Charge below 20%."
     INST_SLEEP -> "Total time from falling asleep to waking up, including short awakenings, split into deep, light and REM sleep." to "Adults need 7–9 h. Deep ≈ 13–23%, REM ≈ 20–25%, light ≈ 50–60%."
@@ -188,7 +190,7 @@ fun MetricDetailScreen(id: String, modifier: Modifier, onBack: () -> Unit) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         // top bar
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", fontSize = 34.sp, color = look.text, modifier = Modifier.clip(CircleShape).clickable(onClick = onBack).padding(horizontal = 12.dp))
+            BackButton(onBack)
             Text(
                 if (look.upperTitles) metricTitle(id).uppercase() else metricTitle(id),
                 fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = look.text, modifier = Modifier.weight(1f),
@@ -324,7 +326,9 @@ private fun displayValue(id: String, v: Double, p: RacePrefs): Double = when (id
 fun onColor(c: Color) = if (c.luminance() > 0.55f) Color.Black else Color.White
 
 /** Colour used for a metric across the app, derived from the theme where it makes sense. */
-fun metricColor(id: String, look: RaceLook): Color = when (id) {
+fun metricColor(id: String, look: RaceLook): Color = if (look.style == UiStyle.MIDNIGHT && id == M.STEPS) look.primary else if (look.style == UiStyle.MONO) {
+    if (id == M.HR || id == M.RESTING_HR || id == M.STEPS) look.primary else look.text
+} else if (look.style.studio) Palette.metric(id, !look.light) else when (id) {
     M.HR, M.RESTING_HR -> Color(0xFFFF4D5E)
     M.SPO2 -> Color(0xFF4FA3FF)
     M.HRV -> Color(0xFF9D7BFF)
@@ -508,7 +512,22 @@ fun SleepBreakdown(s: Stats.Sleep) {
     }
 }
 
-fun sleepColor(type: String, look: RaceLook): Color = when (type) {
+fun sleepColor(type: String, look: RaceLook): Color = if (look.style == UiStyle.MONO) {
+    when (type) {
+        M.SLEEP_DEEP -> look.text
+        M.SLEEP_LIGHT, M.SLEEP_ASLEEP -> androidx.compose.ui.graphics.lerp(look.text, look.panel, 0.45f)
+        M.SLEEP_REM -> androidx.compose.ui.graphics.lerp(look.text, look.panel, 0.70f)
+        else -> look.primary
+    }
+} else if (look.style.studio) {
+    val base = Palette.metric(INST_SLEEP, !look.light)
+    when (type) {
+        M.SLEEP_DEEP -> androidx.compose.ui.graphics.lerp(base, Color.Black, if (look.light) 0.30f else 0.45f)
+        M.SLEEP_LIGHT, M.SLEEP_ASLEEP -> base
+        M.SLEEP_REM -> androidx.compose.ui.graphics.lerp(base, Color.White, 0.42f)
+        else -> if (look.light) Color(0xFFD69A2D) else Color(0xFFE8B552)
+    }
+} else when (type) {
     M.SLEEP_DEEP -> mix(look.secondary, Color(0xFF2B1F8F), 0.35f)
     M.SLEEP_LIGHT, M.SLEEP_ASLEEP -> look.secondary
     M.SLEEP_REM -> Color(0xFF5CE1E6)
@@ -601,7 +620,7 @@ fun LabeledBars(
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            labels.forEach { Text(it, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = look.dim, textAlign = TextAlign.Center, maxLines = 1, softWrap = false) }
+            labels.forEach { Text(it, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = look.dim, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Visible) }
         }
     }
 }

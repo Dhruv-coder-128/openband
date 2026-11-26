@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,10 +28,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openband.app.ble.BandManager
 import com.openband.app.data.Db
+import com.openband.app.data.M
 import com.openband.app.data.Stats
 import com.openband.app.data.Workout
 import com.openband.app.workout.ActiveState
@@ -82,7 +82,7 @@ fun fmtDuration(ms: Long): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%02d:%02d".format(m, sec)
 }
 
-private fun fmtPace(secPerKm: Double?, imperial: Boolean): String {
+internal fun fmtPace(secPerKm: Double?, imperial: Boolean): String {
     if (secPerKm == null || secPerKm.isNaN() || secPerKm > 3600 || secPerKm < 60) return "--"
     val s = if (imperial) secPerKm * 1.609344 else secPerKm
     return "%d:%02d".format((s / 60).toInt(), (s % 60).toInt())
@@ -96,22 +96,21 @@ fun SportsScreen(modifier: Modifier) {
     val active by WorkoutManager.active.collectAsState()
     var screen by rememberSaveable { mutableStateOf("list") }
     var sportId by rememberSaveable { mutableStateOf("run") }
-    var viewing by remember { mutableStateOf<Workout?>(null) }
     val scope = rememberCoroutineScope()
+    val open = LocalOpenMetric.current
 
     // a running workout always owns this tab
     if (active != null) {
         ActiveWorkoutScreen(active!!, modifier,
-            onFinish = { save -> scope.launch { val w = WorkoutManager.finish(save); if (w != null) { viewing = w; screen = "summary" } else screen = "list" } })
+            onFinish = { save -> scope.launch { val w = WorkoutManager.finish(save); screen = "list"; if (w != null) open("page:workout:${w.id}") } })
         return
     }
-    BackHandler(enabled = screen != "list") { screen = "list"; viewing = null }
+    BackHandler(enabled = screen != "list") { screen = "list" }
     when (screen) {
         "prep" -> PrepScreen(Sports.byId(sportId), modifier, onCancel = { screen = "list" })
-        "summary" -> viewing?.let { SummaryScreen(it, modifier, onBack = { screen = "list"; viewing = null }) } ?: run { screen = "list" }
         else -> SportHome(modifier,
             onPick = { sportId = it; screen = "prep" },
-            onOpen = { viewing = it; screen = "summary" })
+            onOpen = { open("page:workout:${it.id}") })
     }
 }
 
@@ -141,7 +140,7 @@ private fun SportHome(modifier: Modifier, onPick: (String) -> Unit, onOpen: (Wor
         val week = history.filter { it.start >= weekStart }
         SectionCard(null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🔥", fontSize = 34.sp)
+                MetricIcon(AppIcons.Flame, Palette.metric(M.CALORIES, !look.light), 44.dp)
                 Column(Modifier.padding(start = 10.dp).weight(1f)) {
                     Text("$streak-day streak", fontWeight = FontWeight.Black, fontSize = 20.sp, color = look.text)
                     Text("a workout or ${"%,d".format(p.stepGoal)} steps counts as an active day", style = MaterialTheme.typography.labelSmall, color = look.dim)
@@ -154,6 +153,8 @@ private fun SportHome(modifier: Modifier, onPick: (String) -> Unit, onOpen: (Wor
                 MiniStat("Distance", fmtDistance(week.sumOf { it.distanceM }, p.imperial).let { "${it.first} ${it.second}" }, "", Modifier.weight(1f))
             }
         }
+
+        InsightLinks()
 
         // segmented: Start | History
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(50)).background(look.panel).padding(4.dp)) {
@@ -221,7 +222,7 @@ private fun HistoryTab(history: List<Workout>, onOpen: (Workout) -> Unit) {
         (listOf("all") + sportsDone).forEach { id ->
             val sel = id == filter
             Text(
-                if (id == "all") "All" else Sports.byId(id).let { "${it.emoji} ${it.name}" }, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                if (id == "all") "All" else Sports.byId(id).name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                 color = if (sel) onColor(look.primary) else look.text,
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) look.primary else look.panel).clickable { filter = id; shown = 15 }.padding(horizontal = 14.dp, vertical = 7.dp),
             )
@@ -260,7 +261,7 @@ private fun SportChip(sp: SportDef, modifier: Modifier, onClick: () -> Unit) {
         modifier.clip(RoundedCornerShape(16.dp)).background(look.panel).clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(sp.emoji, fontSize = 28.sp)
+        SportIcon(sp, 44.dp)
         Text(sp.name, style = MaterialTheme.typography.labelMedium, color = look.text, maxLines = 1, softWrap = false, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
         Text(if (sp.gps == Gps.NEEDED) "HR · GPS · map" else "HR", style = MaterialTheme.typography.labelSmall, color = look.dim, maxLines = 1)
     }
@@ -276,10 +277,11 @@ private fun WorkoutRow(w: Workout, onClick: () -> Unit) {
         Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp)).background(look.panel).clickable(onClick = onClick).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(sp.emoji, fontSize = 26.sp)
+        SportIcon(sp, 40.dp)
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(sp.name + if (w.gps) "  📍" else "", fontWeight = FontWeight.Bold, color = look.text)
+            Text(sp.name + if (w.gps) " · GPS" else "", fontWeight = FontWeight.Bold, color = look.text)
             Text(df.format(Date(w.start)), style = MaterialTheme.typography.labelSmall, color = look.dim)
+            if (w.imported) Text("From ${w.source}", style = MaterialTheme.typography.labelSmall, color = Palette.metric(M.STEPS, !look.light))
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(fmtDuration(w.movingMs), fontWeight = FontWeight.Bold, color = look.text)
@@ -374,8 +376,8 @@ private fun PrepScreen(sp: SportDef, modifier: Modifier, onCancel: () -> Unit) {
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", fontSize = 34.sp, color = look.text, modifier = Modifier.clip(CircleShape).clickable(onClick = onCancel).padding(horizontal = 12.dp))
-            Text(sp.emoji, fontSize = 30.sp)
+            BackButton(onCancel)
+            SportIcon(sp, 38.dp)
             Text("  " + sp.name, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
         }
         Text("Sensors this sport uses - you can start right away", style = MaterialTheme.typography.bodyMedium, color = look.dim, modifier = Modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp))
@@ -456,7 +458,7 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(a.sport.emoji, fontSize = 28.sp)
+            SportIcon(a.sport, 36.dp)
             Text("  " + a.sport.name, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = look.text, modifier = Modifier.weight(1f))
             val live = st.ready && a.hr != null
             Box(Modifier.size(8.dp).clip(CircleShape).background(if (a.paused) look.warn else if (live) look.ok else look.danger))
@@ -471,9 +473,14 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
             Text(fmtDuration(a.elapsedMs), fontFamily = look.display, fontWeight = FontWeight.Black, fontSize = 60.sp, color = look.text, maxLines = 1, softWrap = false)
         }
 
-        // live map (OpenStreetMap) with the track so far
+        // live map with the track so far, and rounds counted as you go
         if (a.gpsUsed) {
-            OsmMap(a.route, follow = true, height = 230.dp, me = gps.lat?.let { la -> gps.lon?.let { lo -> la to lo } })
+            val laps = remember(a.route.size / 5) { com.openband.app.workout.Laps.detect(a.route) }
+            OsmMap(a.route, follow = true, height = 260.dp, me = gps.lat?.let { la -> gps.lon?.let { lo -> la to lo } }, lapLine = laps?.line)
+            if (laps != null) Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                StatTile("Rounds", "${laps.count}", "laps", Modifier.weight(1f))
+                StatTile("Last round", fmtDuration(laps.laps.last().seconds * 1000L), "${laps.laps.last().meters.toInt()} m", Modifier.weight(1f))
+            }
             Text(
                 if (gps.fix) "GPS ±${gps.accuracy!!.toInt()} m · ${gps.usedSats} satellites" else "GPS searching… ${gps.usedSats} satellites",
                 style = MaterialTheme.typography.labelSmall, color = look.dim, modifier = Modifier.padding(start = 6.dp, top = 4.dp, bottom = 6.dp),
@@ -555,8 +562,122 @@ private fun ZoneBar(zones: List<Int>, modifier: Modifier = Modifier) {
 
 // ================================================================================================ summary
 
+/** Where the workout began and ended, and how the two relate. */
 @Composable
-private fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
+private fun RouteCard(w: Workout) {
+    val look = LocalRace.current
+    val p = look.prefs
+    val ctx = LocalContext.current
+    val clock = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
+    val a = w.route.first(); val b = w.route.last()
+    val gap = com.openband.app.workout.Laps.straight(a, b)
+    SectionCard("Start and finish") {
+        listOf(Triple("Start", a, Color(0xFF1F9D58)), Triple("Finish", b, Color(0xFFD63B3B))).forEach { (name, pt, c) ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                    runCatching {
+                        ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("geo:${pt.lat},${pt.lon}?q=${pt.lat},${pt.lon}($name)")))
+                    }
+                }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(c))
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(name + " · " + clock.format(Date(w.start + pt.t * 1000L)), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = look.text)
+                    Text("%.5f, %.5f".format(Locale.US, pt.lat, pt.lon), style = MaterialTheme.typography.labelSmall, color = look.dim)
+                }
+                Text("Open", style = MaterialTheme.typography.labelMedium, color = look.primary)
+            }
+        }
+        val d = fmtDistance(gap, p.imperial)
+        Text(
+            if (gap < 40) "Loop: you finished where you started (${gap.toInt()} m apart)."
+            else "You finished ${if (gap < 1000) "${gap.toInt()} m" else "${d.first} ${d.second}"} in a straight line from the start.",
+            style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+/** Rounds walked or run around the same loop. */
+@Composable
+private fun LapsCard(r: com.openband.app.workout.Laps.Result) {
+    val look = LocalRace.current
+    val p = look.prefs
+    val fast = r.fastest
+    val slowest = r.laps.maxOf { it.seconds / it.meters }
+    SectionCard("Rounds") {
+        Row(Modifier.fillMaxWidth()) {
+            FigureColumn("Rounds", "${r.count}", "", Modifier.weight(1f))
+            FigureColumn("One round", "${r.avgMeters.toInt()}", "m", Modifier.weight(1f))
+            FigureColumn("Average time", fmtDuration(r.avgSeconds * 1000L), "", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(12.dp))
+        r.laps.forEach { lap ->
+            val per = lap.seconds / lap.meters
+            val frac = (fast.seconds / fast.meters / per).toFloat().coerceIn(0.2f, 1f)
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${lap.number}", Modifier.width(30.dp), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = look.text)
+                Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(look.panelHi)) {
+                    Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(5.dp)).background(look.primary.copy(alpha = if (per <= fast.seconds / fast.meters + 1e-6) 1f else 0.5f)))
+                }
+                Text(fmtDuration(lap.seconds * 1000L), Modifier.width(60.dp), style = MaterialTheme.typography.bodyMedium, color = look.text, textAlign = TextAlign.End)
+                Text("${lap.meters.toInt()} m", Modifier.width(62.dp), style = MaterialTheme.typography.bodySmall, color = look.dim, textAlign = TextAlign.End)
+            }
+        }
+        val pace = fast.seconds / (fast.meters / (if (p.imperial) 1609.344 else 1000.0))
+        Text(
+            "Fastest: round ${fast.number} at ${"%d:%02d".format((pace / 60).toInt(), (pace % 60).toInt())} ${if (p.imperial) "/mi" else "/km"}. " +
+                "Rounds are worked out from the GPS track; phone GPS can be a few metres off." + if (slowest <= 0) "" else "",
+            style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+}
+
+/** Everything else that can be worked out from the recording. */
+@Composable
+private fun MoreStats(w: Workout, sp: com.openband.app.workout.SportDef) {
+    val look = LocalRace.current
+    val p = look.prefs
+    val clock = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val movingMin = w.movingMs / 60_000.0
+    // fastest speed held for about 20 seconds, so a single GPS jump does not count
+    val top = remember(w.id) {
+        var best = 0.0
+        var j = 0
+        val r = w.route
+        val acc = DoubleArray(r.size)
+        for (i in 1 until r.size) acc[i] = acc[i - 1] + com.openband.app.workout.Laps.straight(r[i - 1], r[i])
+        for (i in r.indices) {
+            while (j < i && r[i].t - r[j].t > 25) j++
+            val dt = r[i].t - r[j].t
+            if (dt >= 15) best = maxOf(best, (acc[i] - acc[j]) / dt * 3.6)
+        }
+        best
+    }
+    val alts = w.route.map { it.alt }.filter { it != 0.0 }
+    SectionCard("More detail") {
+        KeyValue("Started", clock.format(Date(w.start)))
+        KeyValue("Finished", clock.format(Date(w.end)))
+        KeyValue("Total time", fmtDuration(w.end - w.start))
+        KeyValue("Moving time", fmtDuration(w.movingMs))
+        if (w.distanceM >= 50 && w.movingMs > 0) KeyValue("Average speed", fmtSpeed(w.distanceM / (w.movingMs / 1000.0) * 3.6, p.imperial) + if (p.imperial) " mph" else " km/h")
+        if (top > 1) KeyValue("Best speed", fmtSpeed(top, p.imperial) + if (p.imperial) " mph" else " km/h")
+        if (sp.steps && w.steps > 0 && movingMin > 0.5) {
+            KeyValue("Steps", "%,d".format(w.steps))
+            KeyValue("Cadence", "${(w.steps / movingMin).toInt()} steps/min")
+            if (w.distanceM >= 50) KeyValue("Stride length", "%.2f m".format(w.distanceM / w.steps))
+        }
+        if (movingMin > 0.5) KeyValue("Energy rate", "%.1f kcal/min".format(w.kcal / movingMin))
+        if (alts.size > 5) {
+            KeyValue("Lowest / highest point", "${alts.min().toInt()} m / ${alts.max().toInt()} m")
+            KeyValue("Total climb", "${WorkoutManager.elevationGain(w.route).toInt()} m")
+        }
+        if (w.route.size >= 2) KeyValue("GPS points", "${w.route.size}")
+    }
+}
+
+@Composable
+fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
     val look = LocalRace.current
     val p = look.prefs
     val ctx = LocalContext.current
@@ -578,21 +699,22 @@ private fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
     val speed = if (w.distanceM > 50 && moving > 0) w.distanceM / (moving / 1000.0) * 3.6 else null
     val gain = remember(w.id) { WorkoutManager.elevationGain(w.route) }
     val splits = remember(w.id, p.imperial) { WorkoutManager.splits(w, if (p.imperial) 1609.344 else 1000.0) }
+    val laps = remember(w.id) { com.openband.app.workout.Laps.detect(w.route) }
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", fontSize = 34.sp, color = look.text, modifier = Modifier.clip(CircleShape).clickable(onClick = onBack).padding(horizontal = 12.dp))
+            BackButton(onBack)
             Column(Modifier.weight(1f)) {
-                Text("${sp.emoji}  ${sp.name}", fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
+                Text(sp.name, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
                 Text(df.format(Date(w.start)), style = MaterialTheme.typography.labelSmall, color = look.dim)
             }
-            Text("🗑", fontSize = 22.sp, modifier = Modifier.clip(CircleShape).clickable { confirmDelete = true }.padding(10.dp))
+            androidx.compose.material3.Icon(AppIcons.Trash, "Delete", Modifier.size(44.dp).clip(CircleShape).clickable { confirmDelete = true }.padding(10.dp), tint = look.dim)
         }
 
         // the map first, like Strava
         if (w.route.size >= 2) {
             Spacer(Modifier.height(8.dp))
-            OsmMap(w.route, height = 260.dp)
+            OsmMap(w.route, height = 300.dp, lapLine = laps?.line)
         }
 
         Column(Modifier.fillMaxWidth().padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -615,6 +737,12 @@ private fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
             StatTile("Min HR", if (w.minHr > 0) "${w.minHr}" else "--", "bpm", Modifier.weight(1f))
         }
         if (w.pausedMs > 1000) Text("Paused for ${fmtDuration(w.pausedMs)} · elapsed ${fmtDuration(w.end - w.start)}", style = MaterialTheme.typography.labelSmall, color = look.dim, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+
+        WorkoutActions(w)
+        SameRouteCard(w)
+        if (w.route.size >= 2) RouteCard(w)
+        if (laps != null) LapsCard(laps)
+        MoreStats(w, sp)
 
         // splits
         if (splits.isNotEmpty()) SectionCard(look.pick("Lap times", "Splits", "SPLITS")) {
@@ -676,7 +804,7 @@ private fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
             KeyValue("Heart rate", if (w.avgHr > 0) "Band · optical sensor ✓" else "no readings")
             KeyValue("Motion / steps", if (sp.steps) "Band · accelerometer ✓" else "not used")
             KeyValue("Location", if (w.gps) "Phone GPS ✓ · ${w.route.size} points" else if (sp.gps == Gps.NEEDED) "not used" else "not needed")
-            KeyValue("Calories", "estimate (MET)")
+            KeyValue("Calories", if (w.imported) "From the ${w.source} app" else if (p.calTotal) "Heart-rate formula" else "Band (same basis as Pebble)")
         }
         Spacer(Modifier.height(24.dp))
     }

@@ -18,6 +18,8 @@
     <!-- Background / service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -101,6 +103,15 @@
             android:foregroundServiceType="connectedDevice" />
 
         <service
+            android:name=".live.LiveService"
+            android:exported="false"
+            android:foregroundServiceType="health|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Always-on daily health summary notification that refreshes from Health Connect" />
+        </service>
+
+        <service
             android:name=".workout.WorkoutService"
             android:exported="false"
             android:foregroundServiceType="location|connectedDevice" />
@@ -123,5 +134,77 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- widgets:start -->
+        <receiver android:name=".widget.StepsWidget" android:exported="true" android:label="@string/wl_steps">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_steps" />
+        </receiver>
+        <receiver android:name=".widget.CaloriesWidget" android:exported="true" android:label="@string/wl_calories">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_calories" />
+        </receiver>
+        <receiver android:name=".widget.HeartRateWidget" android:exported="true" android:label="@string/wl_hr">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_hr" />
+        </receiver>
+        <receiver android:name=".widget.HeartGraphWidget" android:exported="true" android:label="@string/wl_hrgraph">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_hrgraph" />
+        </receiver>
+        <receiver android:name=".widget.SleepWidget" android:exported="true" android:label="@string/wl_sleep">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sleep" />
+        </receiver>
+        <receiver android:name=".widget.SleepStagesWidget" android:exported="true" android:label="@string/wl_sleepstages">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sleepstages" />
+        </receiver>
+        <receiver android:name=".widget.Spo2Widget" android:exported="true" android:label="@string/wl_spo2">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_spo2" />
+        </receiver>
+        <receiver android:name=".widget.HrvWidget" android:exported="true" android:label="@string/wl_hrv">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_hrv" />
+        </receiver>
+        <receiver android:name=".widget.StressWidget" android:exported="true" android:label="@string/wl_stress">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_stress" />
+        </receiver>
+        <receiver android:name=".widget.TempWidget" android:exported="true" android:label="@string/wl_temp">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_temp" />
+        </receiver>
+        <receiver android:name=".widget.BatteryWidget" android:exported="true" android:label="@string/wl_battery">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_battery" />
+        </receiver>
+        <receiver android:name=".widget.RingsWidget" android:exported="true" android:label="@string/wl_rings3">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_rings3" />
+        </receiver>
+        <receiver android:name=".widget.VitalsWidget" android:exported="true" android:label="@string/wl_vitals">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vitals" />
+        </receiver>
+        <receiver android:name=".widget.WeekStepsWidget" android:exported="true" android:label="@string/wl_weeksteps">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_weeksteps" />
+        </receiver>
+        <receiver android:name=".widget.StreakWidget" android:exported="true" android:label="@string/wl_streak">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_streak" />
+        </receiver>
+        <!-- widgets:end -->
     </application>
 </manifest>

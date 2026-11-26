@@ -1,5 +1,6 @@
 package com.openband.app.ui
 
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -94,11 +96,11 @@ fun HomeScreen(modifier: Modifier, onOpenBand: () -> Unit, onOpenHealth: () -> U
     }, openBand = onOpenBand)
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
-        when (look.style) {
+        if (look.style.studio) DashStudio(d) else when (look.family) {
             UiStyle.RACING -> DashRacing(d)
             UiStyle.CYBER -> DashCyber(d)
             UiStyle.RINGS -> DashRings(d)
-            UiStyle.CLEAN -> DashClean(d)
+            else -> DashClean(d)
         }
         MeasureNowCard(d.band)
         Spacer(Modifier.height(24.dp))
@@ -118,7 +120,7 @@ private fun visible(d: DashCtx, p: RacePrefs, exclude: Set<String>): Pair<List<S
 private fun WaitingNote(hidden: Int, d: DashCtx) {
     val look = LocalRace.current
     if (hidden <= 0) return
-    val msg = if (d.band.ready) "$hidden more metrics will appear once the band sends them."
+    val msg = if (d.band.ready) (if (hidden == 1) "1 more metric will appear once the band sends it." else "$hidden more metrics will appear once the band sends them.")
     else "$hidden metrics (SpO2, HRV, stress…) come straight from the band — connect it in ${look.names.garage}."
     Text(
         look.pick(msg, msg, "> $hidden SENSORS OFFLINE // " + if (d.band.ready) "AWAITING DATA" else "LINK REQUIRED"),
@@ -229,10 +231,10 @@ private fun MetricBar(spec: GaugeSpec, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SleepCard(s: TodaySummary, p: RacePrefs, title: String) {
+private fun SleepCard(s: TodaySummary, p: RacePrefs, title: String?) {
     val look = LocalRace.current
     val open = LocalOpenMetric.current
-    SectionCard(title, Modifier.clickable { open(INST_SLEEP) }) {
+    SectionCard(title?.takeIf { it.isNotEmpty() }, Modifier.clickable { open(INST_SLEEP) }) {
         val sl = s.sleep
         if (sl == null) { Text("No sleep data yet", color = look.dim); return@SectionCard }
         val tf = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -246,7 +248,21 @@ private fun SleepCard(s: TodaySummary, p: RacePrefs, title: String) {
         Spacer(Modifier.height(10.dp))
         if (sl.segments.size > 1) Hypnogram(sl, Modifier.fillMaxWidth(), height = 96.dp) else StintBar(sl.deep, sl.light, sl.rem, sl.other, sl.awake)
         Spacer(Modifier.height(8.dp))
-        val racing = look.style == UiStyle.RACING
+        val racing = look.family == UiStyle.RACING
+        if (look.style.studio) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                listOf(Triple("Deep", sl.deep, M.SLEEP_DEEP), Triple("Light", sl.light + sl.other, M.SLEEP_LIGHT), Triple("REM", sl.rem, M.SLEEP_REM), Triple("Awake", sl.awake, M.SLEEP_AWAKE)).forEach { (n, v, t) ->
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(sleepColor(t, look)))
+                            Text(n, Modifier.padding(start = 5.dp), style = MaterialTheme.typography.labelSmall, color = look.dim)
+                        }
+                        Text(Stats.fmtMinutes(v), style = MaterialTheme.typography.bodyMedium, color = look.text, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+            }
+            return@SectionCard
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (sl.deep > 0) Legend(Color(0xFFEDEDED), if (racing) "H" else "", "Deep ${Stats.fmtMinutes(sl.deep)}")
             if (sl.light > 0) Legend(Color(0xFFFFD12E), if (racing) "M" else "", "Light ${Stats.fmtMinutes(sl.light)}")
@@ -526,8 +542,16 @@ private fun DashRings(d: DashCtx) {
 
 /** Ring with a soft glow, value in the middle and the goal under it. All three rings share one size. */
 @Composable
-private fun GlowRing(label: String, center: String, sub: String, fraction: Float?, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun GlowRing(label: String, center: String, sub: String, fractionTarget: Float?, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val look = LocalRace.current
+    // the ring sweeps from empty to its value the first time it appears, then follows live changes smoothly
+    var shown by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
+    val animated by androidx.compose.animation.core.animateFloatAsState(
+        if (shown) (fractionTarget ?: 0f) else 0f,
+        androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "ring",
+    )
+    val fraction: Float? = if (fractionTarget == null) null else animated
     val size = 102.dp
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(vertical = 6.dp)) {
         Box(Modifier.size(size), contentAlignment = Alignment.Center) {
@@ -768,9 +792,9 @@ private fun CleanTile(id: String, spec: GaugeSpec, week: List<Double?>?, modifie
 
 /** Start a live reading on the band from the dashboard (heart rate takes ~25 s to warm up). */
 @Composable
-private fun MeasureNowCard(st: BandState) {
+private fun MeasureNowCard(st: BandState, withHeader: Boolean = true) {
     val look = LocalRace.current
-    SectionCard(look.pick("Launch control · measure now", "Measure now", "MEASURE_NOW")) {
+    SectionCard(if (look.style.studio) null else look.pick("Launch control · measure now", "Measure now", "MEASURE_NOW")) {
         Text(
             if (st.ready) "Starts a live reading on the band. Keep it snug on your wrist and stay still for about 30 seconds."
             else "Connect the band first (Settings → Band).",
@@ -795,4 +819,154 @@ private fun MeasureNowCard(st: BandState) {
             RaceButton("Stop ${st.liveKind!!.name.lowercase().replace('_', ' ')}", Modifier.fillMaxWidth()) { BandManager.stopLive() }
         }
     }
+}
+
+
+// =============================================================================================== OPENBAND (Today)
+
+/** The big card at the top. In the Bold look it is filled with the accent colour and everything on it turns white. */
+@Composable
+private fun HeroSurface(content: @Composable (onHero: Color?) -> Unit) {
+    val look = LocalRace.current
+    if (look.style != UiStyle.BOLD) { SectionCard(null) { content(null) }; return }
+    val on = if (look.primary.luminance() > 0.5f) Color(0xFF101113) else Color.White
+    val inner = look.copy(
+        panel = look.primary, panelHi = on.copy(alpha = 0.24f), border = on.copy(alpha = 0.24f), text = on, dim = on.copy(alpha = 0.82f),
+    )
+    androidx.compose.runtime.CompositionLocalProvider(LocalRace provides inner) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(look.panelShape).background(look.primary).padding(horizontal = 20.dp, vertical = 18.dp)) { content(on) }
+    }
+}
+
+@Composable
+private fun DashStudio(d: DashCtx) {
+    val look = LocalRace.current
+    val p = look.prefs
+    val s = d.s
+    val open = LocalOpenMetric.current
+    val dark = !look.light
+
+    // ---- header: date, greeting, you
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date()).uppercase(), style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp), color = look.dim)
+            Text(greeting() + if (p.displayName.isEmpty()) "" else ", ${p.displayName}", style = MaterialTheme.typography.headlineMedium, color = look.text, modifier = Modifier.padding(top = 2.dp))
+        }
+        ProfileAvatar(44.dp)
+    }
+
+    // ---- one quiet status line (only loud when something needs attention)
+    val b = d.band
+    val (statusText, tone) = when {
+        b.address == null -> "No band paired yet - tap to connect" to 1
+        b.waitingOfficial -> "Waiting for the Pebble app to connect the band" to 1
+        b.otherApp -> "The Pebble app is using the band" to 1
+        b.syncing -> "Syncing your band…" to -1
+        b.ready -> ("Band connected" + (d.battery?.let { " · $it% battery" } ?: "") + if (b.lastLive > 0) " · updated ${ago(b.lastLive)}" else "") to 0
+        b.connected -> "Connecting to your band…" to 1
+        else -> "Band not connected - tap to fix" to 1
+    }
+    Row(
+        Modifier.padding(top = 10.dp).clip(RoundedCornerShape(50)).clickable(onClick = d.openBand).padding(end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(tone)))
+        Text(statusText, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, color = look.dim, maxLines = 1)
+    }
+    if (s == null) return
+
+    // ---- hero: today's movement
+    val steps = s.totals[M.STEPS]
+    val stepsCol = metricColor(M.STEPS, look)
+    Spacer(Modifier.height(16.dp))
+    HeroSurface { stepsColOnHero ->
+    val look = LocalRace.current
+    val stepsCol = stepsColOnHero ?: stepsCol
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Icon(AppIcons.Steps, null, Modifier.size(18.dp), tint = stepsCol)
+                    Text("Steps today", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelMedium, color = look.dim)
+                }
+                Text(steps?.let { "%,d".format(it.toLong()) } ?: "--", style = MaterialTheme.typography.displayMedium, color = look.text, modifier = Modifier.padding(top = 6.dp))
+                Text("Goal ${"%,d".format(p.stepGoal)}" + (steps?.let { " · ${(it * 100 / p.stepGoal).toInt()}%" } ?: ""), style = MaterialTheme.typography.bodySmall, color = look.dim)
+            }
+            StudioRing(steps?.let { (it / p.stepGoal).toFloat() }, stepsCol, 96.dp, 10.dp) {
+                Text(steps?.let { "${(it * 100 / p.stepGoal).toInt().coerceAtMost(999)}%" } ?: "--", style = MaterialTheme.typography.titleLarge, color = look.text)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(14.dp))
+        val dist = fmtDistance(s.totals[M.DISTANCE], p.imperial)
+        Row(Modifier.fillMaxWidth()) {
+            FigureColumn("Calories", (if (p.calTotal) s.totals[M.TOTAL_CAL] else s.totals[M.CALORIES])?.let { "%,d".format(it.toLong()) } ?: "--", "kcal", Modifier.weight(1f))
+            FigureColumn("Distance", dist.first, dist.second, Modifier.weight(1f))
+            FigureColumn("Active hours", "${s.hourlySteps.count { it >= 60 }}", "h", Modifier.weight(1f))
+        }
+        val note = if (p.calTotal) s.totals[M.CALORIES]?.let { "Includes resting energy · ${it.toInt()} kcal from activity" }
+        else s.totals[M.TOTAL_CAL]?.let { "Same as the Pebble app · ${"%,d".format(it.toLong())} kcal with resting energy" }
+        if (note != null) Text(note, style = MaterialTheme.typography.labelSmall, color = look.dim, modifier = Modifier.padding(top = 10.dp))
+    }
+
+    RecoveryCard()
+
+    // ---- vitals grid
+    SectionHeader("Vitals")
+    val (ids, hidden) = visible(d, p, setOf(M.STEPS, M.CALORIES, M.DISTANCE, M.BATTERY, M.TOTAL_CAL))
+    ids.chunked(2).forEach { pair ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            pair.forEach { id ->
+                val spec = specFor(id, s, p, d.band.liveHr, d.battery)
+                val num: Double? = when (id) {
+                    M.HR -> d.band.liveHr?.toDouble() ?: s.hrPoints.lastOrNull()?.second ?: s.latest[M.HR]?.first
+                    M.RESTING_HR -> s.restingHr
+                    INST_SLEEP -> null
+                    else -> s.latest[id]?.first
+                }
+                val status = if (id == INST_SLEEP) s.sleep?.let { sl -> "${(sl.total * 100 / p.sleepGoalMin).toInt()}% of goal" to (if (sl.total >= p.sleepGoalMin * 0.85) 0 else 1) }
+                else Palette.status(id, num, s.baseline[id])
+                MetricCard(
+                    id, if (id == INST_SLEEP) "Sleep" else spec.label, spec.value, spec.unit.removePrefix("of ").let { if (id == M.STEPS) "" else it }, status,
+                    s.latest[id]?.second?.let { ago(it) }, s.week[id], Modifier.weight(1f).fillMaxHeight(),
+                ) { open(id) }
+            }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+    WaitingNote(hidden, d)
+
+    // ---- heart rate over the day
+    if (s.hrPoints.size > 1) {
+        SectionHeader("Heart rate today")
+        SectionCard(null, Modifier.clickable { open(M.HR) }) {
+            s.hr?.let {
+                Row(Modifier.fillMaxWidth()) {
+                    FigureColumn("Lowest", "${it.min.toInt()}", "bpm", Modifier.weight(1f))
+                    FigureColumn("Average", "${it.avg.toInt()}", "bpm", Modifier.weight(1f))
+                    FigureColumn("Highest", "${it.max.toInt()}", "bpm", Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            LineChart(s.hrPoints, s.from, s.to, color = metricColor(M.HR, look), height = 120.dp, unit = "bpm")
+        }
+    }
+
+    // ---- sleep
+    if (INST_SLEEP in p.layout && s.sleep != null) {
+        SectionHeader("Last night")
+        SleepCard(s, p, null)
+    }
+
+    // ---- movement through the day
+    if (s.hourlySteps.any { it > 0 }) {
+        SectionHeader("Steps by hour")
+        SectionCard(null, Modifier.clickable { open(M.STEPS) }) {
+            LabeledBars(
+                s.hourlySteps.map { it.takeIf { v -> v > 0 } }, (0..23).map { if (it % 6 == 0) "%02d".format(it) else "" }, stepsCol, height = 96.dp,
+                tipOf = { i -> "${"%,d".format(s.hourlySteps[i].toLong())} steps" to "%02d:00 – %02d:59".format(i, i) },
+            )
+        }
+    }
+    SectionHeader("Measure now")
 }

@@ -51,12 +51,13 @@ fun loadToday(db: Db, goalSleepMin: Int, maxHr: Int = 195): TodaySummary {
     val today = LocalDate.now()
     val days = (6 downTo 0).map { today.minusDays(it.toLong()) }
     val week = HashMap<String, List<Double?>>()
-    for (t in listOf(M.STEPS, M.CALORIES, M.DISTANCE, M.HR, M.RESTING_HR, M.SPO2, M.HRV, M.TEMP, M.STRESS, M.RESP, M.TOTAL_CAL, M.WEIGHT)) {
+    for (t in listOf(M.STEPS, M.CALORIES, M.DISTANCE, M.HR, M.RESTING_HR, M.SPO2, M.HRV, M.TEMP, M.STRESS, M.RESP, M.TOTAL_CAL, M.WEIGHT, M.BATTERY)) {
         week[t] = days.map { Stats.dayValue(db, t, it) }
     }
     week[INST_SLEEP] = days.map { Stats.sleepFor(db, it)?.total }
     val sleep = Stats.sleepFor(db, today)
     val (rhr, estimated) = restingHr(db, sleep)
+    week[M.RESTING_HR] = days.map { restingHr(db, Stats.sleepFor(db, it), it).first }
     val baseline = HashMap<String, Double?>()
     for (t in listOf(M.HRV, M.SPO2, M.TEMP, M.STRESS, M.STEPS, M.CALORIES, M.DISTANCE, M.HR, M.RESTING_HR)) {
         baseline[t] = (1..30).mapNotNull { Stats.dayValue(db, t, today.minusDays(it.toLong())) }.takeIf { it.size >= 2 }?.average()
@@ -72,13 +73,15 @@ fun loadToday(db: Db, goalSleepMin: Int, maxHr: Int = 195): TodaySummary {
     val (strain, zones) = strainAndZones(hrRows, rhr ?: 65.0, maxHr)
     return TodaySummary(
         restingHr = rhr, restingEstimated = estimated, strain = strain, zones = zones, baseline = baseline, hourlySteps = hourly,
-        totals = SUM_TYPES.associateWith { Stats.total(db, it, from, to) },
+        totals = SUM_TYPES.associateWith { Stats.total(db, it, from, to) }.toMutableMap().also { m ->
+            m[M.TOTAL_CAL] = Stats.dayValue(db, M.TOTAL_CAL, today)
+        },
         latest = LATEST_TYPES.associateWith { t -> db.latest(t)?.let { it.value to it.ts } },
         hr = Stats.mma(hrRows),
         hrPoints = hrRows.map { it.ts to it.value },
         sleep = sleep,
         week = week,
-        recovery = recoveryScore(db, sleep, goalSleepMin, rhr, baseline[M.RESTING_HR]),
+        recovery = recoveryScore(db, goalSleepMin),
         from = from, to = to,
     )
 }
@@ -118,27 +121,7 @@ fun strainAndZones(hr: List<com.openband.app.data.Sample>, rest: Double, maxHr: 
     return (21 * (1 - Math.exp(-trimp / 250.0))).coerceIn(0.0, 21.0) to zones.toList()
 }
 
-private fun recoveryScore(db: Db, sleep: Stats.Sleep?, goalSleepMin: Int, rhrNow: Double?, rhrBase: Double?): Int? {
-    val today = LocalDate.now()
-    val parts = ArrayList<Double>()
-    fun baseline(type: String): Double? = (1..14).mapNotNull { Stats.dayValue(db, type, today.minusDays(it.toLong())) }.takeIf { it.size >= 3 }?.average()
-    val now = System.currentTimeMillis()
-    val hrvToday = Stats.mma(db.series(M.HRV, now - 24 * 3_600_000L, now))?.avg
-    if (hrvToday != null) {
-        val base = baseline(M.HRV)
-        parts += if (base != null) 50 + 50 * ((hrvToday / base - 1) / 0.3).coerceIn(-1.0, 1.0)
-        else ((hrvToday - 20) / 60 * 100).coerceIn(5.0, 100.0)
-    }
-    val rhr = rhrNow
-    if (rhr != null) {
-        val base = rhrBase
-        parts += if (base != null) 50 - 50 * ((rhr / base - 1) / 0.1).coerceIn(-1.0, 1.0)
-        else (100 - (rhr - 45) * 2.5).coerceIn(5.0, 100.0)
-    }
-    if (sleep != null) parts += (sleep.total / goalSleepMin * 100).coerceIn(0.0, 100.0)
-    if (parts.isEmpty()) return null
-    return parts.average().toInt().coerceIn(1, 100)
-}
+private fun recoveryScore(db: Db, goalSleepMin: Int): Int? = com.openband.app.data.Recovery.compute(db, LocalDate.now(), goalSleepMin)?.score
 
 @Composable
 fun rememberToday(): TodaySummary? {

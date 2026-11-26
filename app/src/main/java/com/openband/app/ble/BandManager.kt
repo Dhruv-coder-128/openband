@@ -250,7 +250,7 @@ object BandManager {
         if (foreground) return
         // With the Pebble app installed OpenBand stays completely silent in the background: nothing it sends can
         // reach the Pebble app's measure / sync. Data is read (the band keeps 7 days) next time OpenBand is opened.
-        if (officialInstalled() && !soloAllowed) return
+        if (officialInstalled() && !soloAllowed && !com.openband.app.ui.RaceSettings.prefs.value.bgBand) return
         if (alwaysOn) { if (state.value.ready) sync() else ensureConnected(); return }
         if (System.currentTimeMillis() - prefs.getLong("last_sync", 0) < 12 * 60_000L) return
         connectAttempts = 0
@@ -683,6 +683,7 @@ object BandManager {
         if (batch.isEmpty()) return
         db.insertSamples(batch)
         db.trimRaw()
+        runCatching { com.openband.app.widget.WidgetUpdater.request(ctx) }
         if (!export) return
         val written = runCatching { HealthRepo(ctx).exportBand(batch) }.getOrDefault(0)
         log("Saved ${batch.size} samples" + if (written > 0) ", $written written to Health Connect" else "")

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,13 +59,18 @@ fun HistoryScreen(modifier: Modifier) {
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
         ScreenTitle(LocalRace.current.names.history, "Your history, day by day")
+        val open = LocalOpenMetric.current
+        SectionCard(null) {
+            LinkRow(AppIcons.Trends, LocalRace.current.primary, "Weekly and monthly report", "Totals, averages and what changed", null) { open("page:report") }
+            LinkRow(AppIcons.Heart, LocalRace.current.primary, "Recovery", "Readiness score and its last 14 days", null) { open("page:recovery") }
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             metrics.forEach { m ->
                 FilterChip(selected = metric == m, onClick = { metric = m }, label = { Text(if (m == SLEEP) "Sleep" else M.label(m)) })
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(7, 14, 30, 90).forEach { d -> FilterChip(selected = days == d, onClick = { days = d }, label = { Text("$d days") }) }
+            listOf(7, 14, 30, 90).forEach { d -> FilterChip(selected = days == d, onClick = { days = d }, label = { Text("${d}d", maxLines = 1, softWrap = false) }) }
         }
         SectionCard(if (metric == SLEEP) "Sleep" else M.label(metric)) {
             val present = values.mapNotNull { it.second }
@@ -74,7 +78,7 @@ fun HistoryScreen(modifier: Modifier) {
                 Text("Average: ${fmt(present.average())}", style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(8.dp))
-            BarChart(values.map { it.second }, tip = { i -> fmt(values[i].second) to values[i].first.format(DateTimeFormatter.ofPattern("EEE d MMM")) })
+            BarChart(values.map { it.second }, color = if (metric == SLEEP) metricColor(INST_SLEEP, LocalRace.current) else metricColor(metric, LocalRace.current), tip = { i -> fmt(values[i].second) to values[i].first.format(DateTimeFormatter.ofPattern("EEE d MMM")) })
         }
         SectionCard(LocalRace.current.pick("Lap times · by day", "By day")) {
             val f = DateTimeFormatter.ofPattern("EEE d MMM")
