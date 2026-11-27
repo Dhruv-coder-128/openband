@@ -35,12 +35,14 @@ data class Workout(
     val kcal: Double, val avgHr: Int, val maxHr: Int, val minHr: Int, val hr: List<Pair<Int, Int>>, val route: List<RoutePt>, val gps: Boolean,
     /** Where it came from: "" = recorded in OpenBand, otherwise the app name (e.g. "Pebble"). */
     val source: String = "", val extId: String? = null,
+    /** JSON: calorie method, lifting sets, pool lengths, interval rounds. */
+    val extra: String = "",
 ) {
     val imported get() = source.isNotEmpty()
     val movingMs get() = (end - start - pausedMs).coerceAtLeast(0)
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db", null, 3) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db", null, 4) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -73,7 +75,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
             "CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY AUTOINCREMENT, sport TEXT NOT NULL, start_ts INTEGER NOT NULL, " +
                 "end_ts INTEGER NOT NULL, paused_ms INTEGER NOT NULL, distance_m REAL NOT NULL, steps INTEGER NOT NULL, kcal REAL NOT NULL, " +
                 "avg_hr INTEGER NOT NULL, max_hr INTEGER NOT NULL, min_hr INTEGER NOT NULL, hr TEXT NOT NULL, route TEXT NOT NULL, gps INTEGER NOT NULL, " +
-                "source TEXT NOT NULL DEFAULT '', ext_id TEXT)"
+                "source TEXT NOT NULL DEFAULT '', ext_id TEXT, extra TEXT NOT NULL DEFAULT '')"
         )
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_ext ON workouts(ext_id)")
     }
@@ -85,6 +87,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
             db.execSQL("ALTER TABLE workouts ADD COLUMN ext_id TEXT")
             db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_ext ON workouts(ext_id)")
         }
+        // versions 2 and 3 already have a workouts table; older ones just created it complete
+        if (oldVersion in 2..3) db.execSQL("ALTER TABLE workouts ADD COLUMN extra TEXT NOT NULL DEFAULT ''")
     }
 
     // ---------------------------------------------------------------- workouts
@@ -97,7 +101,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
             put("hr", w.hr.joinToString(",") { "${it.first}:${it.second}" })
             put("route", w.route.joinToString(";") { "%.6f,%.6f,%d,%.1f".format(java.util.Locale.US, it.lat, it.lon, it.t, it.alt) })
             put("gps", if (w.gps) 1 else 0)
-            put("source", w.source); put("ext_id", w.extId)
+            put("source", w.source); put("ext_id", w.extId); put("extra", w.extra)
         }
         val id = writableDatabase.insertWithOnConflict("workouts", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
         changes.value = changes.value + 1
@@ -106,7 +110,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
 
     fun workouts(limit: Int = 200): List<Workout> =
         readableDatabase.rawQuery(
-            "SELECT id, sport, start_ts, end_ts, paused_ms, distance_m, steps, kcal, avg_hr, max_hr, min_hr, hr, route, gps, source, ext_id FROM workouts ORDER BY start_ts DESC LIMIT $limit", null
+            "SELECT id, sport, start_ts, end_ts, paused_ms, distance_m, steps, kcal, avg_hr, max_hr, min_hr, hr, route, gps, source, ext_id, extra FROM workouts ORDER BY start_ts DESC LIMIT $limit", null
         ).use { c ->
             buildList {
                 while (c.moveToNext()) add(
@@ -119,7 +123,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
                             if (f.size < 2) return@mapNotNull null
                             RoutePt(f[0].toDoubleOrNull() ?: return@mapNotNull null, f[1].toDoubleOrNull() ?: return@mapNotNull null, f.getOrNull(2)?.toIntOrNull() ?: 0, f.getOrNull(3)?.toDoubleOrNull() ?: 0.0)
                         },
-                        c.getInt(13) == 1, c.getString(14) ?: "", c.getString(15),
+                        c.getInt(13) == 1, c.getString(14) ?: "", c.getString(15), c.getString(16) ?: "",
                     )
                 )
             }

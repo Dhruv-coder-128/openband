@@ -102,7 +102,13 @@ fun SportsScreen(modifier: Modifier) {
     // a running workout always owns this tab
     if (active != null) {
         ActiveWorkoutScreen(active!!, modifier,
-            onFinish = { save -> scope.launch { val w = WorkoutManager.finish(save); screen = "list"; if (w != null) open("page:workout:${w.id}") } })
+            onFinish = { save, test ->
+                scope.launch {
+                    val w = WorkoutManager.finish(save, test); screen = "list"
+                    if (w != null) open("page:workout:${w.id}")
+                    if (test) open("page:hrr")
+                }
+            })
         return
     }
     BackHandler(enabled = screen != "list") { screen = "list" }
@@ -148,26 +154,24 @@ private fun SportHome(modifier: Modifier, onPick: (String) -> Unit, onOpen: (Wor
             }
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MiniStat("This week", "${week.size}", "workouts", Modifier.weight(1f))
+                MiniStat("Workouts", "${week.size}", "", Modifier.weight(1f))
                 MiniStat("Time", Stats.fmtMinutes(week.sumOf { it.movingMs } / 60000.0), "", Modifier.weight(1f))
                 MiniStat("Distance", fmtDistance(week.sumOf { it.distanceM }, p.imperial).let { "${it.first} ${it.second}" }, "", Modifier.weight(1f))
             }
         }
 
-        InsightLinks()
-
-        // segmented: Start | History
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(50)).background(look.panel).padding(4.dp)) {
-            listOf("Start", "History (${history.size})").forEachIndexed { i, label ->
+        // segmented: Start | History | Insights
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(look.pill()).background(look.panel).padding(4.dp)) {
+            listOf("Start", "History", "Insights").forEachIndexed { i, label ->
                 val sel = tab == i
                 Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(50)).background(if (sel) look.primary else Color.Transparent).clickable { tab = i }.padding(vertical = 9.dp),
+                    Modifier.weight(1f).clip(look.pill()).background(if (sel) look.primary else Color.Transparent).clickable { tab = i }.padding(vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text(label, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (sel) onColor(look.primary) else look.dim) }
             }
         }
 
-        if (tab == 0) StartTab(history, onPick) else HistoryTab(history, onOpen)
+        when (tab) { 0 -> StartTab(history, onPick); 1 -> HistoryTab(history, onOpen); else -> InsightsTab() }
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -185,7 +189,7 @@ private fun StartTab(history: List<Workout>, onPick: (String) -> Unit) {
             val sel = c == chip
             Text(
                 c, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = if (sel) onColor(look.primary) else look.text, maxLines = 1,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) look.primary else look.panel).clickable { chip = c }.padding(horizontal = 16.dp, vertical = 9.dp),
+                modifier = Modifier.clip(look.pill()).background(if (sel) look.primary else look.panel).clickable { chip = c }.padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
     }
@@ -224,7 +228,7 @@ private fun HistoryTab(history: List<Workout>, onOpen: (Workout) -> Unit) {
             Text(
                 if (id == "all") "All" else Sports.byId(id).name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                 color = if (sel) onColor(look.primary) else look.text,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) look.primary else look.panel).clickable { filter = id; shown = 15 }.padding(horizontal = 14.dp, vertical = 7.dp),
+                modifier = Modifier.clip(look.pill()).background(if (sel) look.primary else look.panel).clickable { filter = id; shown = 15 }.padding(horizontal = 14.dp, vertical = 7.dp),
             )
         }
     }
@@ -258,7 +262,7 @@ private fun MiniStat(label: String, value: String, sub: String, modifier: Modifi
 private fun SportChip(sp: SportDef, modifier: Modifier, onClick: () -> Unit) {
     val look = LocalRace.current
     Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(look.panel).clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
+        modifier.reveal().clip(look.tile(16)).background(look.panel).clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         SportIcon(sp, 44.dp)
@@ -274,7 +278,7 @@ private fun WorkoutRow(w: Workout, onClick: () -> Unit) {
     val p = look.prefs
     val df = SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault())
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp)).background(look.panel).clickable(onClick = onClick).padding(12.dp),
+        Modifier.fillMaxWidth().padding(vertical = 3.dp).reveal().clip(look.tile(16)).background(look.panel).clickable(onClick = onClick).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SportIcon(sp, 40.dp)
@@ -378,7 +382,7 @@ private fun PrepScreen(sp: SportDef, modifier: Modifier, onCancel: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             BackButton(onCancel)
             SportIcon(sp, 38.dp)
-            Text("  " + sp.name, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
+            Text("  " + heading(sp.name), fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
         }
         Text("Sensors this sport uses - you can start right away", style = MaterialTheme.typography.bodyMedium, color = look.dim, modifier = Modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp))
 
@@ -409,6 +413,8 @@ private fun PrepScreen(sp: SportDef, modifier: Modifier, onCancel: () -> Unit) {
             }
         }
 
+        if (sp.gps == Gps.NEEDED) GhostPicker(sp, if (gps.fix) gps.lat else null, if (gps.fix) gps.lon else null)
+
         // starting never waits for a sensor: heart rate and GPS keep connecting while the timer already runs
         RaceButton("Start ${sp.name.lowercase()}", Modifier.fillMaxWidth().padding(top = 8.dp)) {
             WorkoutManager.start(sp, withGps = sp.gps == Gps.NEEDED)
@@ -434,14 +440,14 @@ private fun SmallButton(text: String, onClick: () -> Unit) {
     val look = LocalRace.current
     Text(
         text, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = onColor(look.primary),
-        modifier = Modifier.clip(RoundedCornerShape(50)).background(look.primary).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        modifier = Modifier.clip(look.pill()).background(look.primary).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
     )
 }
 
 // ================================================================================================ active workout
 
 @Composable
-private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (save: Boolean) -> Unit) {
+private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (save: Boolean, heartTest: Boolean) -> Unit) {
     val look = LocalRace.current
     val p = look.prefs
     val view = LocalView.current
@@ -476,7 +482,9 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
         // live map with the track so far, and rounds counted as you go
         if (a.gpsUsed) {
             val laps = remember(a.route.size / 5) { com.openband.app.workout.Laps.detect(a.route) }
-            OsmMap(a.route, follow = true, height = 260.dp, me = gps.lat?.let { la -> gps.lon?.let { lo -> la to lo } }, lapLine = laps?.line)
+            val race by com.openband.app.workout.Ghost.live.collectAsState()
+            GhostLiveCard()
+            OsmMap(a.route, follow = true, height = 260.dp, me = gps.lat?.let { la -> gps.lon?.let { lo -> la to lo } }, lapLine = laps?.line, ghost = race?.position)
             if (laps != null) Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
                 StatTile("Rounds", "${laps.count}", "laps", Modifier.weight(1f))
                 StatTile("Last round", fmtDuration(laps.laps.last().seconds * 1000L), "${laps.laps.last().meters.toInt()} m", Modifier.weight(1f))
@@ -487,12 +495,15 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
             )
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+        val measuresDistance = a.sport.gps == Gps.NEEDED || a.sport.paceMode
+        if (measuresDistance) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
             val dist = fmtDistance(a.distanceM, p.imperial)
             StatTile("Distance", dist.first, dist.second + if (!a.gpsUsed && a.sport.gps == Gps.NEEDED) " · no GPS" else "", Modifier.weight(1f))
             if (a.sport.paceMode) StatTile("Pace", fmtPace(a.paceSecPerKm, p.imperial), if (p.imperial) "min/mi" else "min/km", Modifier.weight(1f))
             else StatTile("Speed", fmtSpeed(a.speedKmh, p.imperial), if (p.imperial) "mph" else "km/h", Modifier.weight(1f))
         }
+
+        TrainingPanel(a)
 
         SectionCard(null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -504,7 +515,7 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
                     }
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(if (zone >= 0) "ZONE ${zone + 1}" else "—", fontWeight = FontWeight.Black, fontSize = 18.sp, color = hrCol)
+                    Text(if (zone >= 0) "ZONE ${zone + 1}" else "WARM-UP", fontWeight = FontWeight.Black, fontSize = 18.sp, color = hrCol)
                     Text(if (zone >= 0) ZONE_NAMES[zone] else "below zone 1", style = MaterialTheme.typography.labelSmall, color = look.dim)
                     Text("avg ${a.avgHr ?: "--"} · max ${a.maxHr ?: "--"}", style = MaterialTheme.typography.labelSmall, color = look.dim)
                 }
@@ -520,7 +531,7 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
 
         Row(Modifier.fillMaxWidth()) {
             StatTile("Calories", "${a.kcal.toInt()}", "kcal", Modifier.weight(1f))
-            StatTile("Steps", if (a.sport.steps) "%,d".format(a.steps) else "--", if (a.sport.steps && a.elapsedMs > 60_000) "${(a.steps * 60_000L / a.elapsedMs)} /min" else "", Modifier.weight(1f))
+            if (a.sport.steps) StatTile("Steps", "%,d".format(a.steps), if (a.elapsedMs > 60_000) "${(a.steps * 60_000L / a.elapsedMs)} /min" else "", Modifier.weight(1f))
             if (a.gpsUsed) StatTile("Climb", "${a.elevGain.toInt()}", "m", Modifier.weight(1f))
         }
 
@@ -534,11 +545,20 @@ private fun ActiveWorkoutScreen(a: ActiveState, modifier: Modifier, onFinish: (s
     if (confirm) AlertDialog(
         onDismissRequest = { confirm = false },
         title = { Text("Finish workout?") },
-        text = { Text("${fmtDuration(a.elapsedMs)} · ${fmtDistance(a.distanceM, p.imperial).let { "${it.first} ${it.second}" }} · ${a.kcal.toInt()} kcal") },
-        confirmButton = { TextButton(onClick = { confirm = false; onFinish(true) }) { Text("Save") } },
+        text = {
+            Column {
+                Text(
+                    fmtDuration(a.elapsedMs) +
+                        (if (a.distanceM >= 50) fmtDistance(a.distanceM, p.imperial).let { " · ${it.first} ${it.second}" } else "") +
+                        " · ${a.kcal.toInt()} kcal",
+                )
+                if (a.hr != null) RaceButton("Save + 2 min heart test", Modifier.fillMaxWidth().padding(top = 12.dp), primary = false) { confirm = false; onFinish(true, true) }
+            }
+        },
+        confirmButton = { TextButton(onClick = { confirm = false; onFinish(true, false) }) { Text("Save") } },
         dismissButton = {
             Row {
-                TextButton(onClick = { confirm = false; onFinish(false) }) { Text("Discard") }
+                TextButton(onClick = { confirm = false; onFinish(false, false) }) { Text("Discard") }
                 TextButton(onClick = { confirm = false }) { Text("Keep going") }
             }
         },
@@ -705,7 +725,7 @@ fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             BackButton(onBack)
             Column(Modifier.weight(1f)) {
-                Text(sp.name, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
+                Text(heading(sp.name), fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = look.text)
                 Text(df.format(Date(w.start)), style = MaterialTheme.typography.labelSmall, color = look.dim)
             }
             androidx.compose.material3.Icon(AppIcons.Trash, "Delete", Modifier.size(44.dp).clip(CircleShape).clickable { confirmDelete = true }.padding(10.dp), tint = look.dim)
@@ -726,8 +746,11 @@ fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
         }
 
         Row(Modifier.fillMaxWidth()) {
+            val lifted = com.openband.app.workout.Training.setsOf(w.extra)
             if (sp.paceMode) StatTile("Pace", fmtPace(pace, p.imperial), if (p.imperial) "min/mi" else "min/km", Modifier.weight(1f))
-            else StatTile("Speed", fmtSpeed(speed, p.imperial), if (p.imperial) "mph" else "km/h", Modifier.weight(1f))
+            else if (speed != null && (sp.gps == Gps.NEEDED)) StatTile("Speed", fmtSpeed(speed, p.imperial), if (p.imperial) "mph" else "km/h", Modifier.weight(1f))
+            else if (lifted.isNotEmpty()) StatTile("Volume", "%,d".format(com.openband.app.workout.Strength.volume(lifted).toInt()), "kg", Modifier.weight(1f))
+            else StatTile("Time", fmtDuration(w.movingMs), "", Modifier.weight(1f))
             StatTile("Calories", "${w.kcal.toInt()}", "kcal", Modifier.weight(1f))
             if (w.gps) StatTile("Climb", "${gain.toInt()}", "m", Modifier.weight(1f)) else StatTile("Steps", if (sp.steps) "%,d".format(w.steps) else "--", "", Modifier.weight(1f))
         }
@@ -739,6 +762,8 @@ fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
         if (w.pausedMs > 1000) Text("Paused for ${fmtDuration(w.pausedMs)} · elapsed ${fmtDuration(w.end - w.start)}", style = MaterialTheme.typography.labelSmall, color = look.dim, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
 
         WorkoutActions(w)
+        WorkoutHeartCard(w)
+        TrainingSummary(w)
         SameRouteCard(w)
         if (w.route.size >= 2) RouteCard(w)
         if (laps != null) LapsCard(laps)
@@ -804,7 +829,11 @@ fun SummaryScreen(w: Workout, modifier: Modifier, onBack: () -> Unit) {
             KeyValue("Heart rate", if (w.avgHr > 0) "Band · optical sensor ✓" else "no readings")
             KeyValue("Motion / steps", if (sp.steps) "Band · accelerometer ✓" else "not used")
             KeyValue("Location", if (w.gps) "Phone GPS ✓ · ${w.route.size} points" else if (sp.gps == Gps.NEEDED) "not used" else "not needed")
-            KeyValue("Calories", if (w.imported) "From the ${w.source} app" else if (p.calTotal) "Heart-rate formula" else "Band (same basis as Pebble)")
+            KeyValue(
+                "Calories",
+                if (w.imported) "From the ${w.source} app"
+                else com.openband.app.workout.Training.parse(w.extra).optString("kcalMethod").ifEmpty { "Estimate" },
+            )
         }
         Spacer(Modifier.height(24.dp))
     }

@@ -66,7 +66,8 @@ fun loadToday(db: Db, goalSleepMin: Int, maxHr: Int = 195): TodaySummary {
     if (baseline[M.RESTING_HR] == null) baseline[M.RESTING_HR] =
         (1..14).mapNotNull { d -> restingHr(db, Stats.sleepFor(db, today.minusDays(d.toLong())), today.minusDays(d.toLong())).first }.takeIf { it.size >= 2 }?.average()
     val hourly = MutableList(24) { 0.0 }
-    db.series(M.STEPS, from, to).groupBy { it.source }.values.maxByOrNull { l -> l.sumOf { it.value } }?.forEach {
+    // only short records say when the steps happened; a record covering many hours would pile them all on its first hour
+    db.series(M.STEPS, from, to).filter { it.endTs - it.ts <= 2 * 3_600_000L }.groupBy { it.source }.values.maxByOrNull { l -> l.sumOf { it.value } }?.forEach {
         val h = ((it.ts - from) / 3_600_000L).toInt()
         if (h in 0..23) hourly[h] += it.value
     }

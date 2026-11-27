@@ -153,7 +153,7 @@ fun TextButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bool
 @Composable
 fun Switch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: Modifier = Modifier, enabled: Boolean = true, colors: Any? = null) {
     val look = LocalRace.current
-    val sharp = look.family == UiStyle.RACING || look.family == UiStyle.CYBER
+    val sharp = look.family == UiStyle.RACING || look.family == UiStyle.CYBER || look.isConsole
     val shape = if (sharp) CutCornerShape(topStart = 9.dp, bottomEnd = 9.dp) else RoundedCornerShape(50)
     val knobShape = if (sharp) CutCornerShape(topStart = 6.dp, bottomEnd = 6.dp) else CircleShape
     val x by animateDpAsState(if (checked) 22.dp else 0.dp, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), label = "knob")
@@ -201,7 +201,7 @@ fun Slider(
 @Composable
 fun FilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit, modifier: Modifier = Modifier) {
     val look = LocalRace.current
-    val shape = look.controlShape().let { if (look.family == UiStyle.RACING || look.family == UiStyle.CYBER) it else RoundedCornerShape(50) }
+    val shape = look.controlShape().let { if (look.family == UiStyle.RACING || look.family == UiStyle.CYBER) it else look.pill() }
     val bg by animateColorAsState(if (selected) (if (look.inkButtons) look.text else look.primary) else look.panel, tween(160), label = "chip")
     val fg = if (selected) (if (look.inkButtons) look.bg else onColor(look.primary)) else look.text
     Box(
@@ -220,6 +220,7 @@ fun FilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> 
 fun OutlinedTextField(
     value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, label: (@Composable () -> Unit)? = null,
     singleLine: Boolean = false, keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    visual: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
 ) {
     val look = LocalRace.current
     val src = remember { MutableInteractionSource() }
@@ -236,6 +237,7 @@ fun OutlinedTextField(
             }
             BasicTextField(
                 value = value, onValueChange = onValueChange, singleLine = singleLine, interactionSource = src, keyboardOptions = keyboardOptions,
+                visualTransformation = visual,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = look.text),
                 cursorBrush = SolidColor(look.primary),
                 modifier = Modifier.fillMaxWidth(),

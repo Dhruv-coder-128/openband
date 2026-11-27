@@ -58,8 +58,14 @@ fun StudioRing(fraction: Float?, color: Color, size: Dp, stroke: Dp, modifier: M
             val w = stroke.toPx()
             val inset = w / 2
             val sz = Size(this.size.width - w, this.size.height - w)
-            drawArc(look.panelHi, 0f, 360f, false, Offset(inset, inset), sz, style = Stroke(w))
-            if (f > 0.004f) drawArc(color, -90f, 360f * f, false, Offset(inset, inset), sz, style = Stroke(w, cap = StrokeCap.Round))
+            if (look.isConsole) {
+                // segmented dial
+                val n = 36
+                for (k in 0 until n) drawArc(if (k < f * n) color else look.panelHi, -90f + 360f * k / n, 360f / n * 0.62f, false, Offset(inset, inset), sz, style = Stroke(w))
+            } else {
+                drawArc(look.panelHi, 0f, 360f, false, Offset(inset, inset), sz, style = Stroke(w))
+                if (f > 0.004f) drawArc(color, -90f, 360f * f, false, Offset(inset, inset), sz, style = Stroke(w, cap = StrokeCap.Round))
+            }
         }
         content()
     }
@@ -70,7 +76,7 @@ fun StudioRing(fraction: Float?, color: Color, size: Dp, stroke: Dp, modifier: M
 fun SectionHeader(title: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
     val look = LocalRace.current
     Row(modifier.fillMaxWidth().padding(top = 26.dp, bottom = 10.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = look.text)
+        Text(look.style.prompt + themedText(title), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = if (look.style.prompt.isEmpty()) look.text else look.primary)
         trailing?.invoke()
     }
 }
@@ -98,8 +104,7 @@ fun WeekBars(values: List<Double?>, color: Color, fromZero: Boolean, modifier: M
                 val x = slot * i + (slot - bw) / 2
                 val h = if (v == null) 3.dp.toPx() else (((v - floor) / span).toFloat() * size.height).coerceIn(5.dp.toPx(), size.height)
                 val c = if (v == null) look.panelHi else if (i == 6) color else color.copy(alpha = 0.32f)
-                val r = androidx.compose.ui.geometry.CornerRadius(if (look.style == UiStyle.MONO) 0f else bw / 3f)
-                drawRoundRect(c, Offset(x, size.height - h), Size(bw, h), r)
+                themedBar(look, c, x, size.height - h, bw, size.height, if (look.style == UiStyle.MONO) 0f else bw / 3f)
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 3.dp)) {
@@ -125,7 +130,7 @@ fun MetricCard(
     val col = metricColor(id, look)
     val shape = look.panelShape
     Column(
-        modifier.clip(shape).background(look.panel).border(1.dp, look.border, shape).pressable(onClick = onClick).padding(14.dp),
+        modifier.reveal().clip(shape).background(look.panel).border(1.dp, look.border, shape).pressable(onClick = onClick).padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             MetricIcon(Palette.icon(id), col, 30.dp)

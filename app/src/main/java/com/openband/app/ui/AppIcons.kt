@@ -120,6 +120,14 @@ object AppIcons {
         moveTo(6f, 16.5f); lineTo(6f, 11f); arcTo(6f, 6f, 0f, false, true, 18f, 11f); lineTo(18f, 16.5f); lineTo(19.5f, 18f); lineTo(4.5f, 18f); close()
         moveTo(10f, 20.8f); lineTo(14f, 20.8f)
     }
+    /** A speech bubble with a pulse inside: someone who talks about your body. */
+    val Coach = icon("coach") {
+        moveTo(3.5f, 6.5f); arcTo(2.5f, 2.5f, 0f, false, true, 6f, 4f); lineTo(18f, 4f); arcTo(2.5f, 2.5f, 0f, false, true, 20.5f, 6.5f)
+        lineTo(20.5f, 14.5f); arcTo(2.5f, 2.5f, 0f, false, true, 18f, 17f); lineTo(11f, 17f); lineTo(6.2f, 20.8f); lineTo(6.2f, 17f)
+        arcTo(2.7f, 2.5f, 0f, false, true, 3.5f, 14.5f); close()
+        moveTo(6.8f, 10.7f); lineTo(9.2f, 10.7f); lineTo(10.8f, 7.6f); lineTo(13f, 13.4f); lineTo(14.7f, 10.7f); lineTo(17.2f, 10.7f)
+    }
+    val Send = icon("send") { moveTo(12f, 19f); lineTo(12f, 5f); moveTo(6f, 11f); lineTo(12f, 5f); lineTo(18f, 11f) }
     val Info = icon("info") { circle(12f, 12f, 8.5f); moveTo(12f, 11f); lineTo(12f, 16.2f); moveTo(12f, 7.8f); lineTo(12f, 8f) }
     val Timer = icon("timer") { circle(12f, 13.4f, 7.6f); moveTo(12f, 9.4f); lineTo(12f, 13.6f); lineTo(14.8f, 15.4f); moveTo(9.5f, 2.8f); lineTo(14.5f, 2.8f) }
 
@@ -167,7 +175,7 @@ object AppIcons {
         "hike", "climb" -> Mountain
         "bike", "mtb", "spin" -> Bike
         "swim", "row" -> Swim
-        "strength", "hiit", "crossfit", "boxing", "martial", "skip" -> Dumbbell
+        "strength", "compound", "hiit", "crossfit", "boxing", "martial", "skip" -> Dumbbell
         "yoga", "pilates", "stretch", "meditate" -> Yoga
         "football", "cricket", "basketball", "volleyball", "kabaddi", "golf" -> Ball
         "badminton", "tennis", "tabletennis" -> Racket
@@ -180,7 +188,7 @@ object AppIcons {
 @Composable
 fun SportIcon(sp: SportDef, size: Dp = 44.dp) {
     val look = LocalRace.current
-    Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(look.panelHi), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(if (look.isConsole) look.buttonShape else RoundedCornerShape(size * 0.3f)).background(look.panelHi), contentAlignment = Alignment.Center) {
         Icon(AppIcons.forSport(sp.id), sp.name, Modifier.size(size * 0.62f), tint = look.text)
     }
 }
@@ -188,7 +196,8 @@ fun SportIcon(sp: SportDef, size: Dp = 44.dp) {
 /** Icon in a metric's own colour, on a faint tile of the same colour. */
 @Composable
 fun MetricIcon(icon: ImageVector, color: Color, size: Dp = 36.dp) {
-    Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+    val look = LocalRace.current
+    Box(Modifier.size(size).clip(if (look.isConsole) look.buttonShape else RoundedCornerShape(size * 0.3f)).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
         Icon(icon, null, Modifier.size(size * 0.56f), tint = color)
     }
 }

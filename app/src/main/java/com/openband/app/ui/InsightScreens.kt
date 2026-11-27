@@ -69,6 +69,9 @@ fun PageScreen(id: String, modifier: Modifier, onBack: () -> Unit) {
         "heatmap" -> HeatmapScreen(modifier, onBack)
         "report" -> ReportScreen(modifier, onBack)
         "recovery" -> RecoveryScreen(modifier, onBack)
+        "coach" -> CoachScreen(modifier, onBack)
+        "aisetup" -> AiSetupScreen(modifier, onBack)
+        "hrr" -> HeartTestScreen(modifier, onBack)
         else -> LaunchedEffect(id) { onBack() }
     }
 }
@@ -88,6 +91,13 @@ private fun WithWorkout(id: Long?, onBack: () -> Unit, content: @Composable (Wor
 @Composable
 fun PageHeader(title: String, sub: String?, onBack: () -> Unit) {
     val look = LocalRace.current
+    if (look.isConsole) {
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            BackButton(onBack)
+            ConsoleTitle(title, sub, Modifier.weight(1f).padding(start = 4.dp))
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         BackButton(onBack)
         Column(Modifier.padding(start = 2.dp).weight(1f)) {
@@ -124,28 +134,25 @@ fun LinkRow(icon: ImageVector, color: Color, title: String, sub: String?, traili
     }
 }
 
-/** The three entry points shown on the Activity tab. */
+/** The Activity screen's third tab. */
 @Composable
-fun InsightLinks() {
+fun InsightsTab() {
     val look = LocalRace.current
     val open = LocalOpenMetric.current
-    val items = listOf(
-        Triple("Records", AppIcons.Target, "page:records"),
-        Triple("Heatmap", AppIcons.Mountain, "page:heatmap"),
-        Triple("Reports", AppIcons.Trends, "page:report"),
-    )
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items.forEach { (label, icon, page) ->
-            Column(
-                Modifier.weight(1f).clip(look.panelShape).background(look.panel).clickable { open(page) }.padding(vertical = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(icon, null, Modifier.size(24.dp), tint = look.primary)
-                Text(label, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = look.text)
-            }
-        }
+    SectionCard("Your progress") {
+        LinkRow(AppIcons.Target, look.primary, "Personal records", "Fastest distances, best rounds and lifts") { open("page:records") }
+        LinkRow(AppIcons.Trends, look.primary, "Weekly and monthly report", "Totals, averages and what changed") { open("page:report") }
+        LinkRow(AppIcons.Mountain, look.primary, "Heatmap", "Everywhere you have been with GPS") { open("page:heatmap") }
+    }
+    SectionCard("Your body") {
+        LinkRow(AppIcons.Coach, look.primary, "Coach", "Today's plan and your questions") { open("page:coach") }
+        LinkRow(AppIcons.Heart, look.primary, "Heart recovery test", "How fast your heart calms down") { open("page:hrr") }
+        LinkRow(AppIcons.Gauge, look.primary, "Recovery", "Readiness score and its history") { open("page:recovery") }
     }
 }
+
+@Composable
+private fun LinkRow(icon: ImageVector, color: Color, title: String, sub: String, onClick: () -> Unit) = LinkRow(icon, color, title, sub, null, onClick)
 
 // ================================================================================================ recovery
 
@@ -252,6 +259,7 @@ private fun recordValue(r: Insights.Record, imperial: Boolean): String = when (r
     Insights.Kind.CLIMB -> "${r.value.toInt()} m"
     Insights.Kind.KCAL -> "${r.value.toInt()} kcal"
     Insights.Kind.SLEEP -> Stats.fmtMinutes(r.value)
+    Insights.Kind.WEIGHT -> "${r.value.toInt()} kg"
 }
 
 @Composable
@@ -271,7 +279,7 @@ private fun RecordsScreen(modifier: Modifier, onBack: () -> Unit) {
         if (list.isEmpty()) SectionCard(null) { Text("No records yet. Record a walk or run with GPS to start.", color = look.dim) }
         val titles = mapOf(
             Insights.Group.FOOT to "Walking and running", Insights.Group.CYCLE to "Cycling",
-            Insights.Group.ALL to "All workouts", Insights.Group.DAILY to "Daily",
+            Insights.Group.ALL to "All workouts", Insights.Group.DAILY to "Daily", Insights.Group.STRENGTH to "Lifting (estimated 1-rep max)",
         )
         val date = SimpleDateFormat("EEE d MMM yyyy", Locale.getDefault())
         Insights.Group.entries.forEach { g ->
@@ -292,6 +300,7 @@ private fun RecordsScreen(modifier: Modifier, onBack: () -> Unit) {
                         Insights.Kind.KCAL -> AppIcons.Flame
                         Insights.Kind.SLEEP -> AppIcons.Moon
                         Insights.Kind.COUNT -> if (g == Insights.Group.DAILY) AppIcons.Steps else AppIcons.Target
+                        Insights.Kind.WEIGHT -> AppIcons.Dumbbell
                     }
                     LinkRow(
                         icon, look.primary, r.title, listOfNotNull(date.format(Date(r.at)), detail).joinToString(" · "), recordValue(r, p.imperial),

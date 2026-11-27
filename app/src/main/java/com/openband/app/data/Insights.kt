@@ -4,6 +4,8 @@ import com.openband.app.ui.restingHr
 import com.openband.app.workout.Laps
 import com.openband.app.workout.RouteMath
 import com.openband.app.workout.Sports
+import com.openband.app.workout.Strength
+import com.openband.app.workout.Training
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -13,12 +15,12 @@ object Insights {
 
     // ------------------------------------------------------------------------------------------------ records
 
-    enum class Group { FOOT, CYCLE, ALL, DAILY }
+    enum class Group { FOOT, CYCLE, STRENGTH, ALL, DAILY }
 
     /** [value] is in the unit [kind] says: seconds, metres, count or kcal. */
     data class Record(val group: Group, val title: String, val kind: Kind, val value: Double, val extra: Double? = null, val workoutId: Long? = null, val at: Long)
 
-    enum class Kind { TIME_FOR_DISTANCE, ROUND, METERS, DURATION, COUNT, CLIMB, KCAL, SLEEP }
+    enum class Kind { TIME_FOR_DISTANCE, ROUND, METERS, DURATION, COUNT, CLIMB, KCAL, SLEEP, WEIGHT }
 
     fun isFoot(sport: String) = sport in setOf("run", "trail", "walk", "hike", "treadmill")
     fun isCycle(sport: String) = sport in setOf("bike", "mtb")
@@ -54,6 +56,13 @@ object Insights {
         workouts.filter { it.route.size > 10 }.map { it to elevationGain(it.route) }.maxByOrNull { it.second }?.takeIf { it.second >= 5 }
             ?.let { (w, c) -> out += Record(Group.ALL, "Most climb", Kind.CLIMB, c, null, w.id, w.start) }
         workouts.maxByOrNull { it.kcal }?.takeIf { it.kcal > 1 }?.let { out += Record(Group.ALL, "Most calories in a workout", Kind.KCAL, it.kcal, null, it.id, it.start) }
+
+        // best estimated one-rep max per exercise
+        workouts.flatMap { w -> Training.setsOf(w.extra).map { it to w } }.groupBy { it.first.exercise }.forEach { (id, list) ->
+            list.filter { it.first.oneRepMax != null }.maxByOrNull { it.first.oneRepMax!! }?.let { (s, w) ->
+                out += Record(Group.STRENGTH, Strength.byId(id).name, Kind.WEIGHT, s.oneRepMax!!, null, w.id, w.start)
+            }
+        }
 
         val today = LocalDate.now()
         var steps: Pair<Double, LocalDate>? = null

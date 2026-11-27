@@ -4,6 +4,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,22 +62,24 @@ fun SettingsScreen(modifier: Modifier, page: String?, onPage: (String?) -> Unit,
             ),
             "You" to listOf(
                 SettingsItem("goals", AppIcons.Target, "Goals & units", "Daily goals and units"),
+                SettingsItem("ai", AppIcons.Coach, "AI coach", "Language and AI key"),
             ),
             "App" to listOf(
                 SettingsItem("data", AppIcons.Folder, "Data & privacy", "Export, demo, privacy"),
                 SettingsItem("about", AppIcons.Info, "About", "Logo and version"),
             ),
         )
+        val open = LocalOpenMetric.current
         Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
             ScreenTitle(look.names.settings, "Everything else lives here")
             groups.forEach { (title, items) ->
                 Text(
-                    if (look.upperTitles) title.uppercase() else title, style = MaterialTheme.typography.labelMedium, color = look.dim,
+                    if (look.isConsole) look.style.prompt + themedText(title.lowercase()) else if (look.upperTitles) title.uppercase() else title, style = MaterialTheme.typography.labelMedium, color = look.dim,
                     modifier = Modifier.padding(start = 4.dp, top = 14.dp, bottom = 6.dp),
                 )
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(look.panel)) {
+                Column(Modifier.fillMaxWidth().reveal().clip(look.tile(18)).background(look.panel).then(if (look.isConsole) Modifier.border(1.dp, look.border, look.panelShape) else Modifier)) {
                     items.forEachIndexed { i, it ->
-                        Row(Modifier.fillMaxWidth().clickable { onPage(it.id) }.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().clickable { if (it.id == "ai") open("page:aisetup") else onPage(it.id) }.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
                             MetricIcon(it.icon, look.text, 38.dp)
                             Column(Modifier.padding(start = 12.dp).weight(1f)) {
                                 Text(it.title, fontWeight = FontWeight.SemiBold, color = look.text, fontSize = 15.sp)
@@ -100,7 +103,7 @@ fun SettingsScreen(modifier: Modifier, page: String?, onPage: (String?) -> Unit,
         }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             BackButton({ onPage(null) })
-            Text(if (title.isEmpty()) look.names.settings else title, fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = look.text)
+            Text(heading(if (title.isEmpty()) look.names.settings else title), fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = look.text)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (page) {
@@ -142,8 +145,8 @@ private fun DataContent() {
     }
     SectionCard("Privacy") {
         Text(
-            "Everything stays on this phone. The only things fetched from the internet are map pictures (OpenStreetMap) for workouts with GPS. " +
-                "Your photo, name, health data and workouts are never uploaded.",
+            "Your data stays on this phone. Map pictures (OpenStreetMap or Esri satellite) are fetched from the internet for GPS workouts. " +
+                "Only if you set up the AI coach and agree, a summary of your numbers (no name, photo or location) goes to the AI service you chose, when you ask it something.",
             style = MaterialTheme.typography.bodySmall, color = look.dim,
         )
     }

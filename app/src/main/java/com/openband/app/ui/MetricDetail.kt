@@ -192,20 +192,20 @@ fun MetricDetailScreen(id: String, modifier: Modifier, onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             BackButton(onBack)
             Text(
-                if (look.upperTitles) metricTitle(id).uppercase() else metricTitle(id),
+                heading(if (look.upperTitles) metricTitle(id).uppercase() else metricTitle(id)),
                 fontFamily = look.display, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = look.text, modifier = Modifier.weight(1f),
             )
         }
 
         // span tabs
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(50)).background(look.panel).padding(4.dp),
+            Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(look.pill()).background(look.panel).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Span.entries.forEach { s ->
                 val sel = s == span
                 Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(50)).background(if (sel) accent else Color.Transparent)
+                    Modifier.weight(1f).clip(look.pill()).background(if (sel) accent else Color.Transparent)
                         .clickable { span = s }.padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -326,7 +326,19 @@ private fun displayValue(id: String, v: Double, p: RacePrefs): Double = when (id
 fun onColor(c: Color) = if (c.luminance() > 0.55f) Color.Black else Color.White
 
 /** Colour used for a metric across the app, derived from the theme where it makes sense. */
-fun metricColor(id: String, look: RaceLook): Color = if (look.style == UiStyle.MIDNIGHT && id == M.STEPS) look.primary else if (look.style == UiStyle.MONO) {
+fun metricColor(id: String, look: RaceLook): Color = if (look.style == UiStyle.HACKER) {
+    if (id == M.HR || id == M.RESTING_HR) look.danger else look.primary
+} else if (look.style == UiStyle.TERMINAL) {
+    // the classic console palette, one colour per reading
+    when (id) {
+        M.HR, M.RESTING_HR -> Color(0xFFE06C75)
+        M.SPO2, M.DISTANCE -> Color(0xFF61AFEF)
+        M.HRV, INST_SLEEP -> Color(0xFFC678DD)
+        M.BATTERY -> Color(0xFF98C379)
+        M.TEMP, M.STRESS, M.CALORIES, M.TOTAL_CAL -> Color(0xFFE5C07B)
+        else -> look.primary
+    }
+} else if (look.style == UiStyle.MIDNIGHT && id == M.STEPS) look.primary else if (look.style == UiStyle.MONO) {
     if (id == M.HR || id == M.RESTING_HR || id == M.STEPS) look.primary else look.text
 } else if (look.style.studio) Palette.metric(id, !look.light) else when (id) {
     M.HR, M.RESTING_HR -> Color(0xFFFF4D5E)
@@ -512,7 +524,15 @@ fun SleepBreakdown(s: Stats.Sleep) {
     }
 }
 
-fun sleepColor(type: String, look: RaceLook): Color = if (look.style == UiStyle.MONO) {
+fun sleepColor(type: String, look: RaceLook): Color = if (look.style == UiStyle.HACKER || look.style == UiStyle.TERMINAL) {
+    val base = metricColor(INST_SLEEP, look)
+    when (type) {
+        M.SLEEP_DEEP -> androidx.compose.ui.graphics.lerp(base, look.panel, 0.55f)
+        M.SLEEP_LIGHT, M.SLEEP_ASLEEP -> androidx.compose.ui.graphics.lerp(base, look.panel, 0.25f)
+        M.SLEEP_REM -> androidx.compose.ui.graphics.lerp(base, Color.White, 0.35f)
+        else -> look.warn
+    }
+} else if (look.style == UiStyle.MONO) {
     when (type) {
         M.SLEEP_DEEP -> look.text
         M.SLEEP_LIGHT, M.SLEEP_ASLEEP -> androidx.compose.ui.graphics.lerp(look.text, look.panel, 0.45f)
@@ -603,10 +623,8 @@ fun LabeledBars(
             val picked = sel?.let { (it / slot).toInt().coerceIn(0, values.lastIndex) }
             values.forEachIndexed { i, v ->
                 val h = if (v == null) 3f else ((v / max) * (size.height - 4)).toFloat().coerceAtLeast(3f)
-                drawRoundRect(
-                    if (v == null) look.panelHi else if (picked == i) look.text else if (i == values.lastIndex) color else color.copy(alpha = if (picked == null) 0.7f else 0.4f),
-                    Offset(i * slot + (slot - bw) / 2, size.height - h), Size(bw, h), CornerRadius(bw / 3),
-                )
+                val barColor = if (v == null) look.panelHi else if (picked == i) look.text else if (i == values.lastIndex) color else color.copy(alpha = if (picked == null) 0.7f else 0.4f)
+                themedBar(look, barColor, i * slot + (slot - bw) / 2, size.height - h, bw, size.height, bw / 3)
             }
             goal?.let {
                 val y = size.height - ((it / max) * (size.height - 4)).toFloat()

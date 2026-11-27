@@ -17,12 +17,14 @@ enum class UiStyle(val label: String, val blurb: String) {
     STUDIO("OpenBand", "Clean, calm and clear · follows light / dark"),
     MIDNIGHT("Midnight", "True black · calm blue · easy at night"),
     BOLD("Bold", "Solid colour hero · big numbers"),
-    MONO("Mono", "Black and white · sharp edges · one red dot");
+    MONO("Mono", "Black and white · sharp edges · one red dot"),
+    HACKER("Hacker", "Digital rain · system-monitor HUD"),
+    TERMINAL("Terminal", "Your day as command-line output");
 
     /** The dashboard layout this look is built on (the four originals). */
     val family: UiStyle
         get() = when (this) {
-            PAPER, STUDIO, MIDNIGHT, BOLD, MONO -> CLEAN
+            PAPER, STUDIO, MIDNIGHT, BOLD, MONO, HACKER, TERMINAL -> CLEAN
             else -> this
         }
 }
@@ -96,8 +98,24 @@ private val MONO_LIVERIES = listOf(
     Livery("ink", "Ink only", Color(0xFF404040), Color(0xFF8A8A8A)),
 )
 
+private val HACKER_LIVERIES = listOf(
+    Livery("phosphor", "Phosphor green", Color(0xFF3DDC6A), Color(0xFFB6F36A)),
+    Livery("amber", "Amber screen", Color(0xFFF2B134), Color(0xFFE8774A)),
+    Livery("ice", "Ice", Color(0xFF4AD6C8), Color(0xFF8AB4F8)),
+    Livery("red", "Red alert", Color(0xFFF0625A), Color(0xFFF2B134)),
+)
+private val TERMINAL_LIVERIES = listOf(
+    Livery("amber", "Amber", Color(0xFFE5A54B), Color(0xFF61AFEF)),
+    Livery("green", "Green", Color(0xFF98C379), Color(0xFFE5A54B)),
+    Livery("blue", "Blue", Color(0xFF61AFEF), Color(0xFF98C379)),
+    Livery("rose", "Rose", Color(0xFFE06C75), Color(0xFFC678DD)),
+)
+
+/** The command-line styles, which write headings like prompts. */
+val UiStyle.prompt: String get() = when (this) { UiStyle.HACKER -> "> "; UiStyle.TERMINAL -> "$ "; else -> "" }
+
 /** The OpenBand design system and its variants share one layout; they differ in surfaces, type and the hero card. */
-val UiStyle.studio: Boolean get() = this == UiStyle.STUDIO || this == UiStyle.MIDNIGHT || this == UiStyle.BOLD || this == UiStyle.MONO
+val UiStyle.studio: Boolean get() = this == UiStyle.STUDIO || this == UiStyle.MIDNIGHT || this == UiStyle.BOLD || this == UiStyle.MONO || this == UiStyle.HACKER || this == UiStyle.TERMINAL
 
 fun liveriesFor(style: UiStyle): List<Livery> = when (style) {
     UiStyle.RACING -> RACING_LIVERIES
@@ -109,6 +127,8 @@ fun liveriesFor(style: UiStyle): List<Livery> = when (style) {
     UiStyle.MIDNIGHT -> MIDNIGHT_LIVERIES
     UiStyle.BOLD -> BOLD_LIVERIES
     UiStyle.MONO -> MONO_LIVERIES
+    UiStyle.HACKER -> HACKER_LIVERIES
+    UiStyle.TERMINAL -> TERMINAL_LIVERIES
 }
 
 /** Extra colours offered in the custom colour picker. */

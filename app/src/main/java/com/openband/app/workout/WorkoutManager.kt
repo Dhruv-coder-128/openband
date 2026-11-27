@@ -53,9 +53,10 @@ object Sports {
         SportDef("bike", "Ride", "🚴", CYCLE, Gps.NEEDED, 7.5, maxSpeed = 25.0),
         SportDef("mtb", "Mountain bike", "🚵", CYCLE, Gps.NEEDED, 8.5, maxSpeed = 22.0),
         SportDef("spin", "Indoor cycling", "🚲", CYCLE, Gps.NONE, 6.8),
-        SportDef("swim", "Swim", "🏊", WATER, Gps.NONE, 8.0, note = "Wrist heart-rate can read low or drop out in water. Distance isn't tracked."),
+        SportDef("swim", "Swim", "🏊", WATER, Gps.NONE, 6.0, note = "Count pool lengths for distance and pace. Wrist heart rate can read low in water."),
         SportDef("row", "Rowing", "🚣", WATER, Gps.NONE, 7.0),
-        SportDef("strength", "Strength", "🏋️", GYM, Gps.NONE, 5.0),
+        SportDef("strength", "Strength", "🏋️", GYM, Gps.NONE, 5.0, note = "Log your sets, weight and reps while you train."),
+        SportDef("compound", "Compound lifts", "🏋️", GYM, Gps.NONE, 6.0, note = "Squat, deadlift, press, row and pull-up with one-rep-max and volume."),
         SportDef("hiit", "HIIT", "⚡", GYM, Gps.NONE, 8.5),
         SportDef("crossfit", "Crossfit", "🔥", GYM, Gps.NONE, 8.0),
         SportDef("yoga", "Yoga", "🧘", GYM, Gps.NONE, 2.5),
@@ -249,7 +250,7 @@ object WorkoutManager {
      * Keeps the band in its continuous heart-rate mode while a workout (or the sensor check) runs. It is started once and
      * left alone; it is only started again if no reading has arrived for 15 s. Restarting more often makes the band buzz.
      */
-    private fun keepHeartRateAlive() {
+    fun keepHeartRateAlive() {
         val st = BandManager.state.value
         if (!st.ready || !(BandManager.foreground || BandManager.workoutActive)) return
         val now = System.currentTimeMillis()
@@ -285,6 +286,7 @@ object WorkoutManager {
 
     fun start(def: SportDef, withGps: Boolean) {
         prepJob?.cancel(); prepJob = null
+        HeartTest.cancel()
         sport = def
         startMs = System.currentTimeMillis()
         pauseStart = 0L; pausedTotal = 0L
@@ -294,6 +296,8 @@ object WorkoutManager {
         if (useGps) startGps() else if (!hasLocationPermission() || def.gps == Gps.NONE) stopGps()
         BandManager.setWorkoutActive(true)
         WorkoutService.start(ctx)
+        Training.reset(ctx)
+        if (useGps) Ghost.begin(ctx) else Ghost.end()
         scope.launch(Dispatchers.IO) {
             BandManager.pollNow(false)
             stepsAtStart = todayTotal(M.STEPS, true); kcalAtStart = todayTotal(M.CALORIES, true); distAtStart = todayTotal(M.DISTANCE, true)
@@ -312,6 +316,8 @@ object WorkoutManager {
                     val bpm = st.liveHr
                     if (bpm != null && age < 10_000 && bpm in 30..230) hr += ((now - startMs - pausedTotal) / 1000).toInt() to bpm
                     keepHeartRateAlive()
+                    Ghost.update(distance, elapsed(now))
+                    Training.tick()
                     // steps / calories every minute (live HR is already running, so this is a short extra read)
                     if (now - lastPoll > 60_000) {
                         lastPoll = now
@@ -333,7 +339,6 @@ object WorkoutManager {
 
     private fun weightKg(): Double = db.latest(M.WEIGHT)?.value ?: com.openband.app.ui.RaceSettings.prefs.value.weightKg.toDouble()
 
-    private fun metKcal(def: SportDef, ms: Long) = def.met * weightKg() * ms / 3_600_000.0
 
     private fun stepsNow(fresh: Boolean = false) = (todayTotal(M.STEPS, fresh) - stepsAtStart).coerceAtLeast(0.0).toInt()
 
@@ -357,52 +362,77 @@ object WorkoutManager {
             val dd = recent.last().second - recent.first().second
             if (dt > 5 && dd > 5) { speed = dd / dt * 3.6; pace = 1000.0 / (dd / dt) }
         }
-        val dist = if (useGps) distance else (todayTotal(M.DISTANCE) - distAtStart).coerceAtLeast(0.0)
+        val dist = distanceNow()
         val steps = stepsNow()
         active.value = ActiveState(
             def, startMs, pauseStart != 0L, ms, if (BandManager.liveHrAt > 0 && System.currentTimeMillis() - BandManager.liveHrAt < 20_000) BandManager.state.value.liveHr else null,
             bpms.takeIf { it.isNotEmpty() }?.average()?.toInt(), bpms.maxOrNull(), dist, steps,
-            estimateKcal(def, ms), useGps, pace, speed, zones.toList(), hr.toList(), route.toList(), elevationGain(route),
+            estimate(def, ms, dist).kcal, useGps, pace, speed, zones.toList(), hr.toList(), route.toList(), elevationGain(route),
         )
     }
 
-    private fun estimateKcal(def: SportDef, ms: Long): Double {
-        // "like Pebble": the band's own figure; "Whoop style": heart-rate formula. MET estimate when neither is available
+    private fun distanceNow(): Double = when {
+        sport?.id == "swim" -> (Training.pool.value.lengths * Training.pool.value.poolM).toDouble()
+        useGps -> distance
+        else -> (todayTotal(M.DISTANCE) - distAtStart).coerceAtLeast(0.0)
+    }
+
+    private fun estimate(def: SportDef, ms: Long, meters: Double): Energy.Estimate {
         val prefs = com.openband.app.ui.RaceSettings.prefs.value
-        if (prefs.calTotal) Calories.fromHr(hr.toList(), (ms / 1000).toInt(), prefs)?.let { return it }
-        val band = (todayTotal(M.CALORIES) - kcalAtStart).coerceAtLeast(0.0)
-        return if (band >= 5.0) band else metKcal(def, ms)
+        val seconds = ms / 1000.0
+        val readings = hr.toList()
+        // average speed, only for sports where distance is really measured
+        val kmh = if (Energy.kind(def.id) == Energy.Kind.SPEED && meters > 50 && seconds > 60) meters / seconds * 3.6 else null
+        val effort = if (readings.size >= 20) readings.map { it.second }.average() / prefs.maxHr else null
+        return Energy.estimate(
+            def.id, def.met, def.steps, seconds, weightKg(), kmh, effort, prefs.calTotal,
+            (todayTotal(M.CALORIES) - kcalAtStart).coerceAtLeast(0.0),
+            Calories.fromHr(readings, seconds.toInt(), prefs), Calories.bmrPerDay(prefs) / 1440.0,
+        )
     }
 
     private fun ctxMaxHr() = com.openband.app.ui.RaceSettings.prefs.value.maxHr
 
-    /** Ends the workout, saves it and returns it. */
-    suspend fun finish(save: Boolean = true): Workout? {
+    /**
+     * Ends the workout, saves it and returns it. With [heartTest] the band's live heart rate stays on and the two-minute
+     * recovery test starts from the rate at this moment.
+     */
+    suspend fun finish(save: Boolean = true, heartTest: Boolean = false): Workout? {
         val def = sport ?: return null
         loop?.cancel(); loop = null
         if (pauseStart != 0L) resume()
         val end = System.currentTimeMillis()
-        BandManager.stopLive()
-        withContext(Dispatchers.IO) { BandManager.pollNow(false) }
+        Ghost.end()
+        // the rate you stopped at: the middle of the last 15 seconds
+        val sec = (elapsed(end) / 1000).toInt()
+        val stopBpm = hr.filter { it.first >= sec - 15 }.map { it.second }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        if (heartTest && stopBpm != null) HeartTest.begin(ctx, stopBpm)
+        else {
+            BandManager.stopLive()
+            withContext(Dispatchers.IO) { BandManager.pollNow(false) }
+        }
         val ms = elapsed(end)
         // fall back to the band's own heart-rate log if the live stream had gaps
         val logHr = withContext(Dispatchers.IO) { db.series(M.HR, startMs, end).map { it.value.toInt() }.filter { it in 30..230 } }
         val live = hr.map { it.second }
         val all = if (live.size >= 10) live else live + logHr
         val steps = withContext(Dispatchers.IO) { stepsNow(true) }
-        val dist = if (useGps) distance else withContext(Dispatchers.IO) { (todayTotal(M.DISTANCE, true) - distAtStart).coerceAtLeast(0.0) }
-        val kcal = withContext(Dispatchers.IO) { estimateKcal(def, ms) }
+        val dist = withContext(Dispatchers.IO) { todayTotal(M.DISTANCE, true); distanceNow() }
+        val energy = withContext(Dispatchers.IO) { todayTotal(M.CALORIES, true); estimate(def, ms, dist) }
+        val extra = Training.extra(def.id, energy.method)
+        Training.stopIntervals()
         val step = (hr.size / 1200).coerceAtLeast(1)
         val w = Workout(
-            0, def.id, startMs, end, pausedTotal, dist, steps, kcal,
+            0, def.id, startMs, end, pausedTotal, dist, steps, energy.kcal,
             all.takeIf { it.isNotEmpty() }?.average()?.toInt() ?: 0, all.maxOrNull() ?: 0, all.minOrNull() ?: 0,
             hr.filterIndexed { i, _ -> i % step == 0 }, route.filterIndexed { i, _ -> i % ((route.size / 1500).coerceAtLeast(1)) == 0 }, useGps,
+            extra = extra,
         )
         stopGps()
         sport = null
         active.value = null
         WorkoutService.stop(ctx)
-        BandManager.setWorkoutActive(false)
+        if (HeartTest.state.value.phase != HeartTest.Phase.MEASURING) BandManager.setWorkoutActive(false)
         if (!save) return null
         val id = withContext(Dispatchers.IO) { db.insertWorkout(w) }
         return w.copy(id = id).also { lastFinished.value = it }
@@ -410,6 +440,7 @@ object WorkoutManager {
 
     fun discard() {
         loop?.cancel(); loop = null
+        Ghost.end()
         BandManager.stopLive()
         stopGps()
         sport = null

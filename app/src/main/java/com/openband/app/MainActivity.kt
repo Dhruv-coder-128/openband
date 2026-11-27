@@ -169,7 +169,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        RaceNavBar(tab) { lab = false; detail = null; if (it != 4) settingsPage = null; tab = it }
+                        // the coach chat uses the whole screen
+                        if (lab || detail?.substringAfterLast('|') != "page:coach") RaceNavBar(tab) { lab = false; detail = null; if (it != 4) settingsPage = null; tab = it }
                     }
                 }
 
@@ -206,6 +207,24 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun StudioNavBar(labels: List<String>, icons: List<ImageVector>, selected: Int, onSelect: (Int) -> Unit) {
         val look = LocalRace.current
+        if (look.style == UiStyle.TERMINAL) {
+            // tabs written as folders
+            Column(Modifier.fillMaxWidth().background(look.panel)) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(look.border))
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    labels.forEachIndexed { i, label ->
+                        val sel = i == selected
+                        Box(Modifier.weight(if (i == 1 || i == 4) 1.2f else 1f).fillMaxHeight().pressable { onSelect(i) }, contentAlignment = Alignment.Center) {
+                            Text(
+                                (if (sel) "~/" else "") + label.lowercase(), maxLines = 1, softWrap = false, fontFamily = look.body, fontSize = 12.sp,
+                                color = if (sel) look.bg else look.dim, modifier = Modifier.background(if (sel) look.primary else look.panel).padding(horizontal = 5.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            return
+        }
         Column(Modifier.fillMaxWidth().background(look.panel)) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(look.border))
             Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp)) {
@@ -219,7 +238,7 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.width(if (sel) 28.dp else 0.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(look.primary))
                         Spacer(Modifier.height(if (sel) 5.dp else 8.dp))
                         Icon(icons[i], label, Modifier.size(24.dp), tint = col)
-                        Text(label, color = col, fontSize = 11.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+                        Text(if (look.style == UiStyle.HACKER) (if (sel) "[${label.uppercase()}]" else label.uppercase()) else label, color = col, fontSize = if (look.style == UiStyle.HACKER) 10.sp else 11.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
             }

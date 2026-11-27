@@ -103,7 +103,7 @@ private class Pen(val ctx: Context, val c: Canvas, val w: Float, val h: Float, v
     fun color(metric: String): Int = when {
         bold -> onBold
         cfg.accent != 0 -> cfg.accent
-        look.style.studio && look.style != UiStyle.MONO -> Palette.metric(metric, !look.light).toArgb()
+        look.style.studio && look.style != UiStyle.MONO && look.style != UiStyle.HACKER && look.style != UiStyle.TERMINAL -> Palette.metric(metric, !look.light).toArgb()
         else -> metricColor(metric, look).toArgb()
     }
 
@@ -116,7 +116,7 @@ private class Pen(val ctx: Context, val c: Canvas, val w: Float, val h: Float, v
         UiStyle.RACING, UiStyle.CYBER -> font(R.font.orbitron, 700)
         UiStyle.PAPER -> font(R.font.playfair, 700)
         UiStyle.BOLD -> font(R.font.space_grotesk, 700)
-        UiStyle.MONO -> font(R.font.sharetech_mono, 400)
+        UiStyle.MONO, UiStyle.HACKER, UiStyle.TERMINAL -> font(R.font.sharetech_mono, 400)
         else -> font(R.font.inter, 650)
     }
     private val textFace: Typeface = font(R.font.inter, 500)

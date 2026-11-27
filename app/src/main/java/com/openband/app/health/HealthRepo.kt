@@ -213,7 +213,8 @@ class HealthRepo(private val ctx: Context) {
         val p = com.openband.app.ui.RaceSettings.prefs.value
         if (p.calTotal) return
         for (w in db.workouts(100)) {
-            if (w.imported || w.steps < 500) continue
+            // workouts saved with a recorded calorie method are already on the right basis
+            if (w.imported || w.steps < 500 || w.extra.isNotEmpty()) continue
             val formula = Calories.fromHr(w.hr, (w.movingMs / 1000).toInt(), p) ?: continue
             if (Math.abs(w.kcal - formula) > formula * 0.05) continue
             val date = Instant.ofEpochMilli(w.start).atZone(zone).toLocalDate()

@@ -24,6 +24,10 @@ object M {
     const val SLEEP_AWAKE = "sleep_awake"
     const val SLEEP_ASLEEP = "sleep_asleep"
     const val BATTERY = "battery"
+    /** Heart-rate recovery test: beats dropped after 1 and 2 minutes, and the rate it started from. */
+    const val HRR1 = "hrr_1min"
+    const val HRR2 = "hrr_2min"
+    const val HRR_START = "hrr_start"
 
     enum class Agg { SUM, AVG, LATEST }
 
@@ -52,6 +56,9 @@ object M {
         SLEEP_AWAKE to Info("Awake", "min", Agg.SUM),
         SLEEP_ASLEEP to Info("Sleep (unstaged)", "min", Agg.SUM),
         BATTERY to Info("Band battery", "%", Agg.LATEST),
+        HRR1 to Info("Heart recovery (1 min)", "bpm", Agg.LATEST),
+        HRR2 to Info("Heart recovery (2 min)", "bpm", Agg.LATEST),
+        HRR_START to Info("Heart rate at test start", "bpm", Agg.LATEST),
     )
 
     val sleepTypes = listOf(SLEEP_DEEP, SLEEP_LIGHT, SLEEP_REM, SLEEP_ASLEEP)
@@ -65,7 +72,7 @@ object M {
         if (v == null) return "--"
         val i = info[t]
         val d = display(t, v)
-        val s = if ((i?.decimals ?: 0) == 0) Math.round(d).toString() else "%.${i!!.decimals}f".format(d)
+        val s = if ((i?.decimals ?: 0) == 0) "%,d".format(Math.round(d)) else "%.${i!!.decimals}f".format(d)
         return if (i?.unit.isNullOrEmpty()) s else "$s ${i!!.unit}"
     }
 }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.openband.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "6.4.0"
+        versionCode = 20
+        versionName = "6.8.0"
     }
 
     signingConfigs {

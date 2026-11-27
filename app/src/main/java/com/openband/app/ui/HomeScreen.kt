@@ -65,7 +65,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Shared state + actions handed to whichever dashboard layout is active. */
-private class DashCtx(
+class DashCtx(
     val s: TodaySummary?,
     val band: BandState,
     val busy: Boolean,
@@ -96,12 +96,15 @@ fun HomeScreen(modifier: Modifier, onOpenBand: () -> Unit, onOpenHealth: () -> U
     }, openBand = onOpenBand)
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
-        if (look.style.studio) DashStudio(d) else when (look.family) {
+        if (look.style == UiStyle.HACKER) DashHacker(d) else if (look.style == UiStyle.TERMINAL) DashTerminal(d)
+        else if (look.style.studio) DashStudio(d) else when (look.family) {
             UiStyle.RACING -> DashRacing(d)
             UiStyle.CYBER -> DashCyber(d)
             UiStyle.RINGS -> DashRings(d)
             else -> DashClean(d)
         }
+        // Studio looks place these inside their layout; Hacker and Terminal show them in their own manner
+        if (!look.style.studio && !look.isConsole) { RecoveryCard(); CoachCard() }
         MeasureNowCard(d.band)
         Spacer(Modifier.height(24.dp))
     }
@@ -895,6 +898,13 @@ private fun DashStudio(d: DashCtx) {
                 Text(steps?.let { "${(it * 100 / p.stepGoal).toInt().coerceAtMost(999)}%" } ?: "--", style = MaterialTheme.typography.titleLarge, color = look.text)
             }
         }
+        if (look.style.prompt.isNotEmpty()) {
+            val filled = ((steps ?: 0.0) / p.stepGoal * 22).toInt().coerceIn(0, 22)
+            Text(
+                "[" + "#".repeat(filled) + "·".repeat(22 - filled) + "] ${((steps ?: 0.0) * 100 / p.stepGoal).toInt()}%",
+                style = MaterialTheme.typography.bodyMedium, color = look.primary, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 12.dp),
+            )
+        }
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(14.dp))
@@ -910,6 +920,7 @@ private fun DashStudio(d: DashCtx) {
     }
 
     RecoveryCard()
+    CoachCard()
 
     // ---- vitals grid
     SectionHeader("Vitals")

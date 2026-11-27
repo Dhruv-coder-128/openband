@@ -84,7 +84,9 @@ fun AppearanceContent() {
 
         // ---------------------------------------------------------------- style-specific options
         SectionCard("Look & feel") {
-            if (p.uiStyle == UiStyle.MIDNIGHT) {
+            if (p.uiStyle == UiStyle.HACKER || p.uiStyle == UiStyle.TERMINAL) {
+                Text("This look is always dark.", style = MaterialTheme.typography.bodySmall, color = look.dim)
+            } else if (p.uiStyle == UiStyle.MIDNIGHT) {
                 Text("Midnight is always true black.", style = MaterialTheme.typography.bodySmall, color = look.dim)
             } else if (p.uiStyle.studio) {
                 Label("Appearance")
@@ -262,6 +264,8 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
         UiStyle.MIDNIGHT -> RoundedCornerShape(20.dp)
         UiStyle.BOLD -> RoundedCornerShape(24.dp)
         UiStyle.MONO -> RoundedCornerShape(4.dp)
+        UiStyle.HACKER -> RoundedCornerShape(2.dp)
+        UiStyle.TERMINAL -> RoundedCornerShape(10.dp)
         UiStyle.PAPER -> RoundedCornerShape(10.dp)
         else -> RoundedCornerShape(18.dp)
     }
@@ -275,6 +279,8 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
         UiStyle.MIDNIGHT -> { bg = Color.Black; fg = Color(0xFFE9EAEE) }
         UiStyle.BOLD -> { bg = Color(0xFFF4F3EF); fg = Color(0xFF17181A) }
         UiStyle.MONO -> { bg = Color.White; fg = Color(0xFF0A0A0A) }
+        UiStyle.HACKER -> { bg = Color(0xFF030603); fg = Color(0xFF7DF29A) }
+        UiStyle.TERMINAL -> { bg = Color(0xFF1E2127); fg = Color(0xFFE6E1CF) }
     }
     Column(
         modifier.clip(shape).background(bg).border(if (selected) 2.5.dp else 1.dp, if (selected) look.primary else Color(0xFF3A3F48), shape)
@@ -333,6 +339,25 @@ private fun StyleCard(st: UiStyle, selected: Boolean, modifier: Modifier, onClic
                     drawRect(Color(0xFF0A0A0A), Offset(14f, h * 0.22f), Size(size.width * 0.4f, h * 0.3f))
                     drawCircle(pal.primary, 8f, Offset(size.width - 22f, h * 0.3f))
                     for (k in 0 until 14) drawRect(Color(0xFF0A0A0A), Offset(14f + k * (size.width - 28f) / 14f, h * 0.68f), Size((size.width - 28f) / 22f, h * 0.2f))
+                }
+                UiStyle.HACKER -> {
+                    drawRect(pal.primary.copy(alpha = 0.55f), Offset(1f, 1f), Size(size.width - 2f, h - 2f), style = Stroke(2f))
+                    val rows = listOf(0.62f, 0.38f, 0.78f, 0.5f)
+                    rows.forEachIndexed { r, len ->
+                        var x = 14f
+                        var k = 0
+                        while (x < size.width * len) { val w = 6f + ((k * 7 + r * 5) % 4) * 5f; drawRect(pal.primary.copy(alpha = if (r == 3) 1f else 0.7f), Offset(x, h * (0.16f + 0.2f * r)), Size(w, 7f)); x += w + 6f; k++ }
+                    }
+                    drawRect(pal.primary, Offset(size.width * 0.5f + 18f, h * 0.76f), Size(10f, 12f))
+                }
+                UiStyle.TERMINAL -> {
+                    drawRoundRect(Color(0xFF16181C), Offset(0f, 0f), Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(12f))
+                    listOf(Color(0xFFE06C75), Color(0xFFE5C07B), Color(0xFF98C379)).forEachIndexed { k, c -> drawCircle(c, 5f, Offset(16f + k * 18f, 14f)) }
+                    drawRect(pal.primary, Offset(14f, h * 0.38f), Size(12f, 7f))
+                    drawRect(Color(0xFFE6E1CF), Offset(34f, h * 0.38f), Size(size.width * 0.42f, 7f))
+                    drawRect(Color(0xFF959CAA), Offset(14f, h * 0.58f), Size(size.width * 0.66f, 7f))
+                    drawRect(pal.primary, Offset(14f, h * 0.78f), Size(12f, 7f))
+                    drawRect(pal.primary, Offset(34f, h * 0.74f), Size(11f, 16f))
                 }
                 UiStyle.STUDIO -> {
                     drawRoundRect(Color.White, Offset(0f, 0f), Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(14f))

@@ -83,7 +83,7 @@ private fun namesFor(s: UiStyle) = when (s) {
     UiStyle.RINGS -> Names("Overview", "Band", "Health", "Trends", "Profile", "Protocol lab", "Sync", "Pair band", "Sport")
     UiStyle.CLEAN -> Names("Today", "Band", "Health", "History", "Style", "Protocol lab", "Sync now", "Pair band", "Workout")
     UiStyle.PAPER -> Names("Today", "Band", "Health", "Journal", "Style", "Protocol lab", "Sync now", "Pair band", "Workout", "Profile", "Settings")
-    UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO -> Names("Today", "Band", "Health", "History", "Appearance", "Protocol lab", "Sync now", "Pair band", "Activity", "Profile", "Settings")
+    UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO, UiStyle.HACKER, UiStyle.TERMINAL -> Names("Today", "Band", "Health", "History", "Appearance", "Protocol lab", "Sync now", "Pair band", "Activity", "Profile", "Settings")
 }
 
 /** Everything the UI needs, available anywhere via [LocalRace]. */
@@ -205,6 +205,7 @@ fun lookFor(p: RacePrefs, systemDark: Boolean = true): RaceLook {
         UiStyle.STUDIO, UiStyle.MIDNIGHT -> Inter to Inter
         UiStyle.BOLD -> SpaceGrotesk to Inter
         UiStyle.MONO -> TechMono to Inter
+        UiStyle.HACKER, UiStyle.TERMINAL -> TechMono to TechMono
     }
     val (display, body) = when (p.font) {
         FontStyle.AUTO -> autoDisplay to autoBody
@@ -215,6 +216,26 @@ fun lookFor(p: RacePrefs, systemDark: Boolean = true): RaceLook {
     val light = (style == UiStyle.CLEAN && p.lightMode) || style == UiStyle.PAPER
     val black = p.oled || style == UiStyle.RINGS
     return when (style) {
+        UiStyle.HACKER, UiStyle.TERMINAL -> {
+            val hacker = style == UiStyle.HACKER
+            RaceLook(
+                p, style, namesFor(style), p.primary, p.secondary,
+                bg = if (hacker) Color(0xFF030603) else Color(0xFF16181C),
+                panel = if (hacker) Color(0xFF080E09) else Color(0xFF1E2127),
+                panelHi = if (hacker) Color(0xFF112016) else Color(0xFF2A2E36),
+                border = if (hacker) mix(Color(0xFF080E09), p.primary, 0.32f) else Color(0xFF3A3F4A),
+                text = if (hacker) mix(Color(0xFFE4F2E6), p.primary, 0.22f) else Color(0xFFE6E1CF),
+                dim = if (hacker) mix(Color(0xFF7C8C80), p.primary, 0.30f) else Color(0xFF959CAA),
+                light = false,
+                danger = if (hacker) Color(0xFFF0625A) else Color(0xFFE06C75),
+                ok = if (hacker) Color(0xFF3DDC6A) else Color(0xFF98C379),
+                warn = if (hacker) Color(0xFFF2B134) else Color(0xFFE5C07B),
+                display = display, body = body,
+                panelShape = if (hacker) CutCornerShape(topStart = 14.dp, bottomEnd = 14.dp) else RoundedCornerShape(10.dp),
+                buttonShape = if (hacker) CutCornerShape(topStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(4.dp),
+                italicTitles = false, upperTitles = false,
+            )
+        }
         UiStyle.RACING -> RaceLook(
             p, style, namesFor(style), p.primary, p.secondary,
             bg = if (black) Color.Black else Color(0xFF0B0C0F), panel = if (black) Color(0xFF0A0A0A) else Color(0xFF15171C),
@@ -357,7 +378,8 @@ fun RaceBackground(content: @Composable () -> Unit) {
     val carbon = rememberCarbonBrush()
     Box(Modifier.fillMaxSize().background(look.bg)) {
         when (look.style) {
-            UiStyle.PAPER, UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO -> Unit
+            UiStyle.PAPER, UiStyle.STUDIO, UiStyle.MIDNIGHT, UiStyle.BOLD, UiStyle.MONO, UiStyle.TERMINAL -> Unit
+            UiStyle.HACKER -> DigitalRain(look.primary, p.animate)
             else -> when (look.family) {
             UiStyle.RACING -> {
                 if (p.carbon && !p.oled) Box(Modifier.fillMaxSize().background(carbon))
@@ -395,6 +417,7 @@ fun RaceBackground(content: @Composable () -> Unit) {
 @Composable
 fun ScreenTitle(title: String, sub: String? = null) {
     val look = LocalRace.current
+    if (look.isConsole) { ConsoleTitle(title, sub, Modifier.padding(top = 12.dp, bottom = 6.dp)); return }
     Column(Modifier.padding(top = 14.dp, bottom = 6.dp)) {
         when (look.family) {
             UiStyle.RACING -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -407,7 +430,7 @@ fun ScreenTitle(title: String, sub: String? = null) {
                 Text(t, style = MaterialTheme.typography.headlineMedium, color = look.secondary.copy(alpha = 0.7f), modifier = Modifier.padding(start = 2.dp, top = 2.dp))
                 Text(t, style = MaterialTheme.typography.headlineMedium, color = look.primary)
             }
-            else -> Text(title, style = MaterialTheme.typography.headlineMedium, color = look.text)
+            else -> Text(look.style.prompt + title, style = MaterialTheme.typography.headlineMedium, color = if (look.style.prompt.isEmpty()) look.text else look.primary)
         }
         if (sub != null) Text(
             if (look.family == UiStyle.CYBER) "// " + sub.lowercase() else sub,
@@ -435,7 +458,8 @@ fun RaceStripes(a: Color, b: Color, modifier: Modifier = Modifier) {
 fun SectionCard(title: String?, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val look = LocalRace.current
     val shape = look.panelShape
-    val base = modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape)
+    val brackets = if (look.style == UiStyle.HACKER) Modifier.brackets(look.primary.copy(alpha = 0.8f)) else Modifier
+    val base = modifier.fillMaxWidth().padding(vertical = 6.dp).reveal().then(brackets).clip(shape)
     val styled = when (look.style) {
         UiStyle.PAPER -> base.background(look.panel).border(1.dp, look.border, shape)
         else -> when (look.family) {
@@ -464,14 +488,14 @@ fun CardTitle(title: String) {
         UiStyle.RACING -> Text(title.uppercase(), style = MaterialTheme.typography.titleMedium, fontStyle = TFontStyle.Italic, color = look.primary)
         UiStyle.CYBER -> Text("// " + title.uppercase(), style = MaterialTheme.typography.titleMedium, color = look.primary)
         UiStyle.RINGS -> Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = look.dim)
-        else -> Text(title, style = MaterialTheme.typography.titleMedium, color = look.text)
+        else -> Text(look.style.prompt + themedText(title), style = MaterialTheme.typography.titleMedium, color = if (look.style.prompt.isEmpty()) look.text else look.primary)
     }
 }
 
 @Composable
 fun StatTile(label: String, value: String, sub: String? = null, modifier: Modifier = Modifier) {
     val look = LocalRace.current
-    Box(modifier.padding(4.dp).clip(look.panelShape).background(look.panel).border(1.dp, look.border, look.panelShape)) {
+    Box(modifier.padding(4.dp).reveal().clip(look.panelShape).background(look.panel).border(1.dp, look.border, look.panelShape)) {
         Column(Modifier.padding(14.dp).fillMaxWidth()) {
             Text(if (look.upperTitles) label.uppercase() else label, style = MaterialTheme.typography.labelMedium, color = look.dim)
             Text(value, style = MaterialTheme.typography.headlineSmall, color = look.text)
@@ -665,6 +689,10 @@ fun BarChart(values: List<Double?>, modifier: Modifier = Modifier, color: Color?
                 else -> look.primary
             }
             val x = i * slot + (slot - bw) / 2
+            if (look.isConsole) {
+                themedBar(look, col.copy(alpha = col.alpha * (if (picked == null || picked == i) 1f else 0.45f)), x, size.height - h, bw, size.height, 0f)
+                return@forEachIndexed
+            }
             val path = Path().apply {
                 val skew = if (look.family == UiStyle.RACING) bw * 0.25f else 0f
                 moveTo(x + skew, size.height - h); lineTo(x + bw, size.height - h)

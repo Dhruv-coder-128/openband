@@ -137,6 +137,8 @@ fun OsmMap(
     /** A moving position dot (route replay). */
     marker: RoutePt? = null,
     flags: Boolean = true,
+    /** Position of the ghost during a race. */
+    ghost: RoutePt? = null,
 ) {
     val look = LocalRace.current
     val ctx = LocalContext.current
@@ -270,6 +272,10 @@ fun OsmMap(
                 }
                 if (done && !loop) flag(end, Color(0xFFD63B3B), "Finish", false)
                 flag(first, Color(0xFF1F9D58), if (loop) "Start & finish" else "Start", true)
+            }
+            if (ghost != null) {
+                val o = at(ghost.lat, ghost.lon)
+                drawCircle(Color(0x66FFFFFF), 15f * dp, o); drawCircle(Color(0xFF17181A), 9f * dp, o); drawCircle(Color.White, 6.5f * dp, o)
             }
             val here = me ?: marker?.let { it.lat to it.lon } ?: if (follow) route.lastOrNull()?.let { it.lat to it.lon } else null
             if (here != null) {
