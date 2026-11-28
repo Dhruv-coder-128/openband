@@ -89,6 +89,13 @@ fun AppearanceContent() {
             } else if (p.uiStyle == UiStyle.MIDNIGHT) {
                 Text("Midnight is always true black.", style = MaterialTheme.typography.bodySmall, color = look.dim)
             } else if (p.uiStyle.studio) {
+                if (p.uiStyle == UiStyle.BOLD) {
+                    Toggle("Liquid step card", p.boldLiquid) { v -> RaceSettings.update { it.copy(boldLiquid = v) } }
+                    Text(
+                        "The step card fills as you walk, leans with the phone and splashes when you tap it. Switch off for the plain card.",
+                        style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                }
                 Label("Appearance")
                 Choice(listOf("Auto", "Light", "Dark"), p.appearance) { i -> RaceSettings.update { it.copy(appearance = i) } }
                 Text("Auto follows your phone's light / dark setting.", style = MaterialTheme.typography.bodySmall, color = look.dim, modifier = Modifier.padding(top = 4.dp))

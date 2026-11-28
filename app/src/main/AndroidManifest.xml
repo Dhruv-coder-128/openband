@@ -24,6 +24,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- optional, each switched on by the user: stay quiet while the Pebble app is on screen; notice walks and rides -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" android:maxSdkVersion="28" />
 
     <!-- Health Connect: read -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
@@ -59,6 +63,11 @@
         <package android:name="com.pebble.plus" />
         <!-- spoken ghost-race updates use the phone's own voice engine -->
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+        <!-- to list apps when choosing which notifications vibrate the band -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -108,11 +117,24 @@
         <service
             android:name=".live.LiveService"
             android:exported="false"
-            android:foregroundServiceType="health|specialUse">
+            android:foregroundServiceType="health|specialUse|connectedDevice">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Always-on daily health summary notification that refreshes from Health Connect" />
         </service>
+
+        <service
+            android:name=".notify.BandNotifyService"
+            android:exported="false"
+            android:label="OpenBand: band vibration for apps"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver android:name=".detect.ActivityReceiver" android:exported="false" />
+        <receiver android:name=".live.RecapReceiver" android:exported="false" />
 
         <service
             android:name=".workout.WorkoutService"

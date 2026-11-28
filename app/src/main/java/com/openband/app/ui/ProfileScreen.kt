@@ -78,6 +78,16 @@ object ProfilePhoto {
 
     fun remove(ctx: Context) { file(ctx).delete(); version.value += 1 }
 
+    /** The stored photo file, for backups. */
+    fun bytes(ctx: Context): ByteArray? = runCatching { file(ctx).takeIf { it.exists() }?.readBytes() }.getOrNull()
+
+    /** Puts a photo from a backup in place, if it really is a picture. */
+    fun restore(ctx: Context, data: ByteArray) {
+        if (BitmapFactory.decodeByteArray(data, 0, data.size) == null) return
+        file(ctx).writeBytes(data)
+        version.value += 1
+    }
+
     fun load(ctx: Context): Bitmap? = runCatching { file(ctx).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path) } }.getOrNull()
 }
 

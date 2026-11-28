@@ -67,11 +67,20 @@ fun PageScreen(id: String, modifier: Modifier, onBack: () -> Unit) {
         "share" -> WithWorkout(arg, onBack) { ShareScreen(it, modifier, onBack) }
         "records" -> RecordsScreen(modifier, onBack)
         "heatmap" -> HeatmapScreen(modifier, onBack)
-        "report" -> ReportScreen(modifier, onBack)
+        "report" -> StoryHubScreen(modifier, onBack)
+        "numbers" -> ReportScreen(modifier, onBack)
+        "story-week" -> StoryScreen(false, arg?.toInt() ?: 0, modifier, onBack)
+        "story-month" -> StoryScreen(true, arg?.toInt() ?: 0, modifier, onBack)
         "recovery" -> RecoveryScreen(modifier, onBack)
         "coach" -> CoachScreen(modifier, onBack)
         "aisetup" -> AiSetupScreen(modifier, onBack)
         "hrr" -> HeartTestScreen(modifier, onBack)
+        "energy" -> EnergyScreen(modifier, onBack)
+        "bodyage" -> BodyAgeScreen(modifier, onBack)
+        // the Sunday notification opens the week it is about
+        "recap" -> StoryScreen(false, recapWeeksBack(), modifier, onBack)
+        "buzz" -> BuzzScreen(modifier, onBack)
+        "measure-hr", "measure-spo2", "measure-hrv", "measure-stress" -> MeasureScreen(MeasureKind.of(parts[1])!!, modifier, onBack)
         else -> LaunchedEffect(id) { onBack() }
     }
 }
@@ -141,13 +150,15 @@ fun InsightsTab() {
     val open = LocalOpenMetric.current
     SectionCard("Your progress") {
         LinkRow(AppIcons.Target, look.primary, "Personal records", "Fastest distances, best rounds and lifts") { open("page:records") }
-        LinkRow(AppIcons.Trends, look.primary, "Weekly and monthly report", "Totals, averages and what changed") { open("page:report") }
+        LinkRow(AppIcons.Trends, look.primary, "Weekly and monthly story", "Your week or month, card by card") { open("page:report") }
         LinkRow(AppIcons.Mountain, look.primary, "Heatmap", "Everywhere you have been with GPS") { open("page:heatmap") }
     }
     SectionCard("Your body") {
         LinkRow(AppIcons.Coach, look.primary, "Coach", "Today's plan and your questions") { open("page:coach") }
         LinkRow(AppIcons.Heart, look.primary, "Heart recovery test", "How fast your heart calms down") { open("page:hrr") }
         LinkRow(AppIcons.Gauge, look.primary, "Recovery", "Readiness score and its history") { open("page:recovery") }
+        LinkRow(AppIcons.Wave, look.primary, "Body energy", "How much you have left today") { open("page:energy") }
+        LinkRow(AppIcons.Target, look.primary, "Body age", "How your habits compare with your age") { open("page:bodyage") }
     }
 }
 
@@ -155,6 +166,8 @@ fun InsightsTab() {
 private fun LinkRow(icon: ImageVector, color: Color, title: String, sub: String, onClick: () -> Unit) = LinkRow(icon, color, title, sub, null, onClick)
 
 // ================================================================================================ recovery
+
+private var lastRecovery: Pair<LocalDate, Recovery.Result>? = null
 
 /** Home card. */
 @Composable
@@ -164,8 +177,11 @@ fun RecoveryCard() {
     val open = LocalOpenMetric.current
     val ver by Db.changes.collectAsState()
     val goal = look.prefs.sleepGoalMin
-    var r by remember { mutableStateOf<Recovery.Result?>(null) }
-    LaunchedEffect(ver, goal) { r = withContext(Dispatchers.IO) { runCatching { Recovery.compute(Db.get(ctx), LocalDate.now(), goal) }.getOrNull() } }
+    var r by remember { mutableStateOf(lastRecovery?.takeIf { it.first == LocalDate.now() }?.second) }
+    LaunchedEffect(ver, goal) {
+        r = withContext(Dispatchers.IO) { runCatching { Recovery.compute(Db.get(ctx), LocalDate.now(), goal) }.getOrNull() }
+        r?.let { lastRecovery = LocalDate.now() to it }
+    }
     val res = r ?: return
     SectionCard(null, Modifier.clickable { open("page:recovery") }) {
         Row(verticalAlignment = Alignment.CenterVertically) {

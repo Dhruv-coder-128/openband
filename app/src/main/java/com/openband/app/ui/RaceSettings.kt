@@ -186,6 +186,14 @@ data class RacePrefs(
     val bgBand: Boolean = false,
     /** false = show activity calories like the Pebble app, true = include resting energy (Whoop / Noise style). */
     val calTotal: Boolean = false,
+    /** Bold look: the step card fills like a glass of liquid. */
+    val boldLiquid: Boolean = true,
+    /** Minutes between the band's automatic heart-rate readings; 0 = leave the band's setting alone. */
+    val hrInterval: Int = 0,
+    /** Notice walks, runs and rides that were not started in the app and ask about them. */
+    val autoDetect: Boolean = false,
+    /** Sunday-night summary notification. */
+    val weeklyRecap: Boolean = true,
     val mapSatellite: Boolean = true,
     val driverName: String = "",
     val carNumber: String = "07",
@@ -248,6 +256,10 @@ object RaceSettings {
             moveNudge = p.getBoolean("moveNudge", d.moveNudge),
             bgBand = p.getBoolean("bgBand", d.bgBand),
             calTotal = p.getBoolean("calTotal", d.calTotal),
+            boldLiquid = p.getBoolean("boldLiquid", d.boldLiquid),
+            hrInterval = p.getInt("hrInterval", d.hrInterval),
+            autoDetect = p.getBoolean("autoDetect", d.autoDetect),
+            weeklyRecap = p.getBoolean("weeklyRecap", d.weeklyRecap),
             mapSatellite = p.getBoolean("mapSat", d.mapSatellite),
             // v2 default was the placeholder "DRIVER"; treat it as "no name yet"
             driverName = if (savedDriver == "DRIVER") "" else savedDriver,
@@ -292,6 +304,10 @@ object RaceSettings {
             putBoolean("moveNudge", v.moveNudge)
             putBoolean("bgBand", v.bgBand)
             putBoolean("calTotal", v.calTotal)
+            putBoolean("boldLiquid", v.boldLiquid)
+            putInt("hrInterval", v.hrInterval)
+            putBoolean("autoDetect", v.autoDetect)
+            putBoolean("weeklyRecap", v.weeklyRecap)
             putBoolean("mapSat", v.mapSatellite)
             putString("driver", v.driverName)
             putString("number", v.carNumber)

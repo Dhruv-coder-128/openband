@@ -26,6 +26,23 @@ data class RawPacket(
 
 const val SOURCE_BAND = "band"
 
+/** Heart rate and route as they are stored: "seconds:bpm,..." and "lat,lon,seconds,altitude;...". */
+fun encodeHr(hr: List<Pair<Int, Int>>) = hr.joinToString(",") { "${it.first}:${it.second}" }
+
+fun decodeHr(s: String): List<Pair<Int, Int>> = s.split(',').mapNotNull { t ->
+    val f = t.split(':')
+    if (f.size != 2) return@mapNotNull null
+    (f[0].toIntOrNull() ?: return@mapNotNull null) to (f[1].toIntOrNull() ?: return@mapNotNull null)
+}
+
+fun encodeRoute(route: List<RoutePt>) = route.joinToString(";") { "%.6f,%.6f,%d,%.1f".format(java.util.Locale.US, it.lat, it.lon, it.t, it.alt) }
+
+fun decodeRoute(s: String): List<RoutePt> = s.split(';').mapNotNull { t ->
+    val f = t.split(',')
+    if (f.size < 2) return@mapNotNull null
+    RoutePt(f[0].toDoubleOrNull() ?: return@mapNotNull null, f[1].toDoubleOrNull() ?: return@mapNotNull null, f.getOrNull(2)?.toIntOrNull() ?: 0, f.getOrNull(3)?.toDoubleOrNull() ?: 0.0)
+}
+
 /** One GPS point: position, seconds since the workout started, altitude in metres. */
 data class RoutePt(val lat: Double, val lon: Double, val t: Int = 0, val alt: Double = 0.0)
 
@@ -93,17 +110,18 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
 
     // ---------------------------------------------------------------- workouts
 
+    private fun values(w: Workout) = ContentValues().apply {
+        put("sport", w.sport); put("start_ts", w.start); put("end_ts", w.end); put("paused_ms", w.pausedMs)
+        put("distance_m", w.distanceM); put("steps", w.steps); put("kcal", w.kcal)
+        put("avg_hr", w.avgHr); put("max_hr", w.maxHr); put("min_hr", w.minHr)
+        put("hr", encodeHr(w.hr))
+        put("route", encodeRoute(w.route))
+        put("gps", if (w.gps) 1 else 0)
+        put("source", w.source); put("ext_id", w.extId); put("extra", w.extra)
+    }
+
     fun insertWorkout(w: Workout): Long {
-        val cv = ContentValues().apply {
-            put("sport", w.sport); put("start_ts", w.start); put("end_ts", w.end); put("paused_ms", w.pausedMs)
-            put("distance_m", w.distanceM); put("steps", w.steps); put("kcal", w.kcal)
-            put("avg_hr", w.avgHr); put("max_hr", w.maxHr); put("min_hr", w.minHr)
-            put("hr", w.hr.joinToString(",") { "${it.first}:${it.second}" })
-            put("route", w.route.joinToString(";") { "%.6f,%.6f,%d,%.1f".format(java.util.Locale.US, it.lat, it.lon, it.t, it.alt) })
-            put("gps", if (w.gps) 1 else 0)
-            put("source", w.source); put("ext_id", w.extId); put("extra", w.extra)
-        }
-        val id = writableDatabase.insertWithOnConflict("workouts", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        val id = writableDatabase.insertWithOnConflict("workouts", null, values(w), SQLiteDatabase.CONFLICT_REPLACE)
         changes.value = changes.value + 1
         return id
     }
@@ -117,17 +135,45 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "openband.db"
                     Workout(
                         c.getLong(0), c.getString(1), c.getLong(2), c.getLong(3), c.getLong(4), c.getDouble(5), c.getInt(6), c.getDouble(7),
                         c.getInt(8), c.getInt(9), c.getInt(10),
-                        c.getString(11).split(',').mapNotNull { t -> t.split(':').takeIf { it.size == 2 }?.let { (a, b) -> (a.toIntOrNull() ?: return@mapNotNull null) to (b.toIntOrNull() ?: return@mapNotNull null) } },
-                        c.getString(12).split(';').mapNotNull { t ->
-                            val f = t.split(',')
-                            if (f.size < 2) return@mapNotNull null
-                            RoutePt(f[0].toDoubleOrNull() ?: return@mapNotNull null, f[1].toDoubleOrNull() ?: return@mapNotNull null, f.getOrNull(2)?.toIntOrNull() ?: 0, f.getOrNull(3)?.toDoubleOrNull() ?: 0.0)
-                        },
+                        decodeHr(c.getString(11)),
+                        decodeRoute(c.getString(12)),
                         c.getInt(13) == 1, c.getString(14) ?: "", c.getString(15), c.getString(16) ?: "",
                     )
                 )
             }
         }
+
+    /**
+     * Restoring a backup: adds the readings and workouts not stored yet, in one transaction. Rows already here are left as
+     * they are. Returns how many of each were added.
+     */
+    fun addMissing(samples: List<Sample>, workouts: List<Workout>): Pair<Int, Int> {
+        val db = writableDatabase
+        var addedSamples = 0
+        var addedWorkouts = 0
+        db.beginTransaction()
+        try {
+            val cv = ContentValues()
+            for (s in samples) {
+                if (s.value.isNaN() || s.value.isInfinite()) continue
+                cv.clear()
+                cv.put("ts", s.ts); cv.put("end_ts", s.endTs); cv.put("type", s.type); cv.put("value", s.value); cv.put("source", s.source)
+                if (db.insertWithOnConflict("samples", null, cv, SQLiteDatabase.CONFLICT_IGNORE) > 0) addedSamples++
+            }
+            val have = db.rawQuery("SELECT sport, start_ts FROM workouts", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(0) to c.getLong(1)) }.toMutableSet()
+            }
+            for (w in workouts) {
+                if (!have.add(w.sport to w.start)) continue
+                if (db.insertWithOnConflict("workouts", null, values(w), SQLiteDatabase.CONFLICT_IGNORE) > 0) addedWorkouts++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        changes.value = changes.value + 1
+        return addedSamples to addedWorkouts
+    }
 
     /** Removes imported workouts that did not come from [source] (e.g. leftovers of other apps' auto-detected sessions). */
     fun deleteImportedExcept(source: String) {

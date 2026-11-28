@@ -22,6 +22,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             runCatching { com.openband.app.widget.WidgetUpdater.updateAll(applicationContext) }
             // short connect -> sync -> release, so the official app keeps working
             runCatching { BandManager.backgroundSync() }
+            runCatching { com.openband.app.detect.Detected.check(applicationContext) }
+            runCatching { com.openband.app.live.RecapAlert.check(applicationContext) }
         } catch (_: Throwable) {
         }
         return Result.success()
@@ -42,5 +44,7 @@ class BootReceiver : BroadcastReceiver() {
         runCatching { com.openband.app.live.LiveService.createChannels(context) }
         runCatching { com.openband.app.live.LiveService.sync(context) }
         runCatching { SyncWorker.schedule(context) }
+        runCatching { com.openband.app.detect.ActivityDetect.sync(context) }
+        runCatching { com.openband.app.live.RecapAlert.schedule(context) }
     }
 }

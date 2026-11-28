@@ -251,7 +251,7 @@ private fun HistoryTab(history: List<Workout>, onOpen: (Workout) -> Unit) {
 @Composable
 private fun MiniStat(label: String, value: String, sub: String, modifier: Modifier) {
     val look = LocalRace.current
-    Column(modifier.clip(RoundedCornerShape(12.dp)).background(look.panelHi).padding(10.dp)) {
+    Column(modifier.clip(look.tile(12)).background(look.panelHi).padding(10.dp)) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = look.dim, maxLines = 1)
         Text(value, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = look.text, maxLines = 1, softWrap = false)
         if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.labelSmall, color = look.dim, maxLines = 1)

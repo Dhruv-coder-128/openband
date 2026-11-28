@@ -25,6 +25,10 @@ interface BandIo {
     fun foreignTraffic(what: String) {}
     /** The band pushed an event (new steps / measurement) - refresh soon. */
     fun bandEvent() {}
+    /** A value arrived for the measurement the user started. */
+    fun liveReading(kind: LiveKind, value: Double) {}
+    /** The band says it cannot take the measurement (usually: not worn properly). */
+    fun liveFailed(kind: LiveKind) {}
 }
 
 /** A driver for one band protocol family. Several drivers can be active on one connection. */
@@ -43,7 +47,20 @@ interface BandProtocol {
     val supportsLive: Boolean get() = false
     suspend fun startLive(io: BandIo, kind: LiveKind) {}
     suspend fun stopLive(io: BandIo) {}
+    /** A light top-up of today's readings, used for background visits. */
+    suspend fun quickRead(io: BandIo) {}
+    /** The band's automatic heart-rate measuring, or null if it did not answer. */
+    suspend fun readHrSetting(io: BandIo): HrSetting? = null
+    /** Switches automatic heart-rate measuring on at this interval and returns what the band then reports. */
+    suspend fun writeHrSetting(io: BandIo, minutes: Int): HrSetting? = null
+    /** A phone-message alert of the given kind, as the official app sends it. */
+    suspend fun alertMessage(io: BandIo, type: Int, label: String): Boolean = false
+    /** The "find my band" vibration. */
+    suspend fun alertFind(io: BandIo): Boolean = false
 }
+
+/** [extra] are further settings in the same record, written back unchanged. */
+data class HrSetting(val enabled: Boolean, val minutes: Int, val extra: List<Int> = emptyList())
 
 /** REALTIME_HR = the band's continuous heart-rate mode (what the Pebble app's sport mode uses); HEART_RATE = one 30 s measurement. */
 enum class LiveKind { HEART_RATE, SPO2, HRV, STRESS, REALTIME_HR }

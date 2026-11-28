@@ -58,14 +58,14 @@ fun SettingsScreen(modifier: Modifier, page: String?, onPage: (String?) -> Unit,
             "Devices" to listOf(
                 SettingsItem("band", AppIcons.Watch, "Band", band.deviceName?.let { "$it · " + if (band.ready) "connected" else band.status.lowercase() } ?: "Pair your band, connection log"),
                 SettingsItem("health", AppIcons.Heart, "Health Connect", "Import and export health data"),
-                SettingsItem("background", AppIcons.Bell, "Background & alerts", "Live notification, goal alerts, auto-refresh"),
+                SettingsItem("background", AppIcons.Bell, "Background & alerts", "Band, interval, vibration, alerts"),
             ),
             "You" to listOf(
                 SettingsItem("goals", AppIcons.Target, "Goals & units", "Daily goals and units"),
                 SettingsItem("ai", AppIcons.Coach, "AI coach", "Language and AI key"),
             ),
             "App" to listOf(
-                SettingsItem("data", AppIcons.Folder, "Data & privacy", "Export, demo, privacy"),
+                SettingsItem("data", AppIcons.Folder, "Data & privacy", "Backup, export, privacy"),
                 SettingsItem("about", AppIcons.Info, "About", "Logo and version"),
             ),
         )
@@ -131,6 +131,7 @@ private fun DataContent() {
     val look = LocalRace.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    BackupCard()
     SectionCard("Export") {
         Text("All measurements stored in the app as a spreadsheet (CSV).", style = MaterialTheme.typography.bodySmall, color = look.dim)
         Spacer(Modifier.height(8.dp))

@@ -96,6 +96,7 @@ fun HomeScreen(modifier: Modifier, onOpenBand: () -> Unit, onOpenHealth: () -> U
     }, openBand = onOpenBand)
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+        DetectedCard()
         if (look.style == UiStyle.HACKER) DashHacker(d) else if (look.style == UiStyle.TERMINAL) DashTerminal(d)
         else if (look.style.studio) DashStudio(d) else when (look.family) {
             UiStyle.RACING -> DashRacing(d)
@@ -104,7 +105,8 @@ fun HomeScreen(modifier: Modifier, onOpenBand: () -> Unit, onOpenHealth: () -> U
             else -> DashClean(d)
         }
         // Studio looks place these inside their layout; Hacker and Terminal show them in their own manner
-        if (!look.style.studio && !look.isConsole) { RecoveryCard(); CoachCard() }
+        if (!look.style.studio && !look.isConsole) { RecoveryCard(); BodyCards(); CoachCard() }
+        if (look.isConsole) BodyCards()
         MeasureNowCard(d.band)
         Spacer(Modifier.height(24.dp))
     }
@@ -793,33 +795,22 @@ private fun CleanTile(id: String, spec: GaugeSpec, week: List<Double?>?, modifie
     }
 }
 
-/** Start a live reading on the band from the dashboard (heart rate takes ~25 s to warm up). */
+/** Each button opens the full-screen measurement for that reading. */
 @Composable
 private fun MeasureNowCard(st: BandState, withHeader: Boolean = true) {
     val look = LocalRace.current
+    val open = LocalOpenMetric.current
     SectionCard(if (look.style.studio) null else look.pick("Launch control · measure now", "Measure now", "MEASURE_NOW")) {
         Text(
-            if (st.ready) "Starts a live reading on the band. Keep it snug on your wrist and stay still for about 30 seconds."
-            else "Connect the band first (Settings → Band).",
+            if (st.ready) "Take a live reading on the band. Keep it snug on your wrist and stay still."
+            else "The band is not connected yet - the measurement will try to connect it.",
             style = MaterialTheme.typography.bodySmall, color = look.dim,
         )
-        if (st.liveHr != null && st.liveKind == com.openband.app.ble.LiveKind.HEART_RATE) {
-            Text("♥ ${st.liveHr} bpm", fontWeight = FontWeight.Black, fontSize = 30.sp, color = look.text, modifier = Modifier.padding(top = 6.dp))
-        }
         Spacer(Modifier.height(8.dp))
-        if (st.liveKind == null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Heart rate" to com.openband.app.ble.LiveKind.HEART_RATE, "SpO2" to com.openband.app.ble.LiveKind.SPO2).forEach { (t, k) ->
-                    RaceButton(t, Modifier.weight(1f), primary = false, enabled = st.ready) { BandManager.startLive(k) }
-                }
+        listOf(listOf("Heart rate" to "measure-hr", "SpO2" to "measure-spo2"), listOf("HRV" to "measure-hrv", "Stress" to "measure-stress")).forEachIndexed { i, pair ->
+            Row(Modifier.fillMaxWidth().padding(top = if (i == 0) 0.dp else 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { (title, page) -> RaceButton(title, Modifier.weight(1f), primary = false, enabled = st.address != null) { open("page:$page") } }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("HRV" to com.openband.app.ble.LiveKind.HRV, "Stress" to com.openband.app.ble.LiveKind.STRESS).forEach { (t, k) ->
-                    RaceButton(t, Modifier.weight(1f), primary = false, enabled = st.ready) { BandManager.startLive(k) }
-                }
-            }
-        } else {
-            RaceButton("Stop ${st.liveKind!!.name.lowercase().replace('_', ' ')}", Modifier.fillMaxWidth()) { BandManager.stopLive() }
         }
     }
 }
@@ -829,7 +820,7 @@ private fun MeasureNowCard(st: BandState, withHeader: Boolean = true) {
 
 /** The big card at the top. In the Bold look it is filled with the accent colour and everything on it turns white. */
 @Composable
-private fun HeroSurface(content: @Composable (onHero: Color?) -> Unit) {
+private fun HeroSurface(level: Float, content: @Composable (onHero: Color?) -> Unit) {
     val look = LocalRace.current
     if (look.style != UiStyle.BOLD) { SectionCard(null) { content(null) }; return }
     val on = if (look.primary.luminance() > 0.5f) Color(0xFF101113) else Color.White
@@ -837,7 +828,8 @@ private fun HeroSurface(content: @Composable (onHero: Color?) -> Unit) {
         panel = look.primary, panelHi = on.copy(alpha = 0.24f), border = on.copy(alpha = 0.24f), text = on, dim = on.copy(alpha = 0.82f),
     )
     androidx.compose.runtime.CompositionLocalProvider(LocalRace provides inner) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(look.panelShape).background(look.primary).padding(horizontal = 20.dp, vertical = 18.dp)) { content(on) }
+        if (look.prefs.boldLiquid) LiquidCard(look.primary, level) { content(on) }
+        else Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(look.panelShape).background(look.primary).padding(horizontal = 20.dp, vertical = 18.dp)) { content(on) }
     }
 }
 
@@ -882,7 +874,7 @@ private fun DashStudio(d: DashCtx) {
     val steps = s.totals[M.STEPS]
     val stepsCol = metricColor(M.STEPS, look)
     Spacer(Modifier.height(16.dp))
-    HeroSurface { stepsColOnHero ->
+    HeroSurface(((steps ?: 0.0) / p.stepGoal).toFloat()) { stepsColOnHero ->
     val look = LocalRace.current
     val stepsCol = stepsColOnHero ?: stepsCol
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -891,7 +883,7 @@ private fun DashStudio(d: DashCtx) {
                     androidx.compose.material3.Icon(AppIcons.Steps, null, Modifier.size(18.dp), tint = stepsCol)
                     Text("Steps today", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelMedium, color = look.dim)
                 }
-                Text(steps?.let { "%,d".format(it.toLong()) } ?: "--", style = MaterialTheme.typography.displayMedium, color = look.text, modifier = Modifier.padding(top = 6.dp))
+                Text(countUp(steps)?.let { "%,d".format(Math.round(it)) } ?: "--", style = MaterialTheme.typography.displayMedium, color = look.text, modifier = Modifier.padding(top = 6.dp))
                 Text("Goal ${"%,d".format(p.stepGoal)}" + (steps?.let { " · ${(it * 100 / p.stepGoal).toInt()}%" } ?: ""), style = MaterialTheme.typography.bodySmall, color = look.dim)
             }
             StudioRing(steps?.let { (it / p.stepGoal).toFloat() }, stepsCol, 96.dp, 10.dp) {
@@ -920,6 +912,7 @@ private fun DashStudio(d: DashCtx) {
     }
 
     RecoveryCard()
+    BodyCards()
     CoachCard()
 
     // ---- vitals grid

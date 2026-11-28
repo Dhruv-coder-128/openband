@@ -124,6 +124,9 @@ fun strainAndZones(hr: List<com.openband.app.data.Sample>, rest: Double, maxHr: 
 
 private fun recoveryScore(db: Db, goalSleepMin: Int): Int? = com.openband.app.data.Recovery.compute(db, LocalDate.now(), goalSleepMin)?.score
 
+/** What Home showed last, with its date. */
+private var lastToday: Pair<java.time.LocalDate, TodaySummary>? = null
+
 @Composable
 fun rememberToday(): TodaySummary? {
     val ctx = LocalContext.current
@@ -131,11 +134,13 @@ fun rememberToday(): TodaySummary? {
     val ver by Db.changes.collectAsState()
     val goal = LocalRace.current.prefs.sleepGoalMin
     val maxHr = LocalRace.current.prefs.maxHr
-    var sum by remember { mutableStateOf<TodaySummary?>(null) }
+    val today = java.time.LocalDate.now()
+    var sum by remember { mutableStateOf(lastToday?.takeIf { it.first == today }?.second) }
     LaunchedEffect(ver, goal, maxHr) {
         // coalesce bursts of updates (live polling) into one reload
         kotlinx.coroutines.delay(300)
         sum = withContext(Dispatchers.IO) { runCatching { loadToday(db, goal, maxHr) }.getOrNull() } ?: sum
+        sum?.let { lastToday = today to it }
     }
     return sum
 }

@@ -37,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import com.openband.app.ui.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +76,18 @@ import androidx.compose.ui.draw.clip
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /** "home" or a page id: where a tapped notification should lead. */
+        const val EXTRA_OPEN = "open"
+    }
+
+    private val openRequest = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_OPEN)?.let { openRequest.value = it }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -111,13 +124,16 @@ class MainActivity : ComponentActivity() {
         }
         runCatching { com.openband.app.live.LiveService.sync(this) }
         val crash = CrashLog.read(this)
+        // only on a fresh start: a rotated or restored screen keeps where the user is
+        if (savedInstanceState == null) intent?.getStringExtra(EXTRA_OPEN)?.let { openRequest.value = it }
         setContent {
             OpenBandTheme {
                 val lightUi = LocalRace.current.light
+                val immersiveNow = com.openband.app.ui.Immersive.dark
                 SideEffect {
                     WindowCompat.getInsetsController(window, window.decorView).run {
-                        isAppearanceLightStatusBars = lightUi
-                        isAppearanceLightNavigationBars = lightUi
+                        isAppearanceLightStatusBars = lightUi && !immersiveNow
+                        isAppearanceLightNavigationBars = lightUi && !immersiveNow
                     }
                 }
                 var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -125,13 +141,21 @@ class MainActivity : ComponentActivity() {
                 var detail by rememberSaveable { mutableStateOf<String?>(null) }
                 var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
                 var crashText by remember { mutableStateOf(crash) }
+                val wanted by openRequest.collectAsState()
+                androidx.compose.runtime.LaunchedEffect(wanted) {
+                    val w = wanted ?: return@LaunchedEffect
+                    lab = false
+                    if (w == "home") { detail = null; tab = 0 } else detail = w
+                    openRequest.value = null
+                }
                 BackHandler(enabled = lab) { lab = false }
                 BackHandler(enabled = !lab && detail != null) { detail = detail?.substringBeforeLast('|', "")?.ifEmpty { null } }
                 BackHandler(enabled = !lab && detail == null && tab == 4 && settingsPage != null) { settingsPage = null }
                 BackHandler(enabled = !lab && detail == null && tab != 0 && !(tab == 4 && settingsPage != null)) { tab = 0 }
 
                 RaceBackground {
-                    Column(Modifier.fillMaxSize()) {
+                    val immersive = com.openband.app.ui.Immersive.dark
+                    Column(Modifier.fillMaxSize().background(if (immersive) Color(0xFF070A0C) else Color.Transparent)) {
                         Box(Modifier.weight(1f).fillMaxWidth().statusBarsPadding()) {
                             val m = Modifier
                             // pages stack on each other ("a|b"); Back removes the top one
@@ -169,8 +193,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        // the coach chat uses the whole screen
-                        if (lab || detail?.substringAfterLast('|') != "page:coach") RaceNavBar(tab) { lab = false; detail = null; if (it != 4) settingsPage = null; tab = it }
+                        // the coach chat and a measurement use the whole screen
+                        val top = detail?.substringAfterLast('|')
+                        val full = top == "page:coach" || top == "page:recap" || top?.startsWith("page:measure") == true || top?.startsWith("page:story") == true
+                        if (lab || !full) RaceNavBar(tab) { lab = false; detail = null; if (it != 4) settingsPage = null; tab = it }
                     }
                 }
 
@@ -216,7 +242,7 @@ class MainActivity : ComponentActivity() {
                         val sel = i == selected
                         Box(Modifier.weight(if (i == 1 || i == 4) 1.2f else 1f).fillMaxHeight().pressable { onSelect(i) }, contentAlignment = Alignment.Center) {
                             Text(
-                                (if (sel) "~/" else "") + label.lowercase(), maxLines = 1, softWrap = false, fontFamily = look.body, fontSize = 12.sp,
+                                label.lowercase(), maxLines = 1, softWrap = false, fontFamily = look.body, fontSize = 11.5.sp,
                                 color = if (sel) look.bg else look.dim, modifier = Modifier.background(if (sel) look.primary else look.panel).padding(horizontal = 5.dp, vertical = 4.dp),
                             )
                         }

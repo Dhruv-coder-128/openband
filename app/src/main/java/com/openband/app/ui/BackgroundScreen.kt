@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,7 +24,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.DisposableEffect
-import com.openband.app.ble.BandManager
 import com.openband.app.health.HealthRepo
 import com.openband.app.live.LiveService
 import java.text.DateFormat
@@ -51,7 +49,6 @@ fun BackgroundContent() {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     val last = remember { HealthRepo(ctx).lastImport }
-    val official = remember { BandManager.officialInstalled() }
 
     SectionCard("Always-on notification") {
         Toggle("Show today's steps, heart rate and calories", p.liveNotif) { v ->
@@ -60,7 +57,7 @@ fun BackgroundContent() {
         }
         Text(
             "Like the Pebble app's step counter: one quiet notification that stays up to date, and keeps your widgets fresh " +
-                "even when OpenBand is closed. It reads what the Pebble app saves to Health Connect, so it never touches the band.",
+                "even when OpenBand is closed. It reads what the Pebble app saves to Health Connect; reading the band itself is the separate switch below.",
             style = MaterialTheme.typography.bodySmall, color = look.dim,
         )
         if (last > 0) Text(
@@ -90,7 +87,18 @@ fun BackgroundContent() {
         }
     }
 
+    BackgroundBandCard()
+    HeartIntervalCard()
+    SectionCard("Band vibration") {
+        val open = LocalOpenMetric.current
+        LinkRow(AppIcons.Bell, look.primary, "Vibrate for apps", "WhatsApp, Instagram, calls and more", null) { open("page:buzz") }
+    }
+    AutoDetectCard()
+
     SectionCard("Little extras") {
+        Toggle("Sunday weekly recap", p.weeklyRecap) { v -> RaceSettings.update { it.copy(weeklyRecap = v) } }
+        Text("On Sunday night: a notification with your week. Tap it to see the full recap.", style = MaterialTheme.typography.bodySmall, color = look.dim)
+        Spacer(Modifier.height(10.dp))
         Toggle("Goal celebration", p.celebrate) { v -> RaceSettings.update { it.copy(celebrate = v) } }
         Text("A short buzz and a note when you reach your step goal, with your streak of goal days.", style = MaterialTheme.typography.bodySmall, color = look.dim)
         Spacer(Modifier.height(10.dp))
@@ -101,14 +109,4 @@ fun BackgroundContent() {
         Text("A nudge if you have hardly moved for an hour between 9 am and 9 pm.", style = MaterialTheme.typography.bodySmall, color = look.dim)
     }
 
-    if (official) SectionCard("Extra readings in the background") {
-        Toggle("Also visit the band in the background", p.bgBand) { v -> RaceSettings.update { it.copy(bgBand = v) } }
-        Text(
-            "Off by default. When on, OpenBand makes a short read-only visit every ~10 minutes, only while the Pebble app already has the band connected, " +
-                "to collect SpO2, HRV, stress and temperature. It sends nothing to the band, but it is one more thing talking to it. " +
-                "Leave it off if your Pebble app ever feels slower.",
-            style = MaterialTheme.typography.bodySmall, color = look.dim,
-        )
-    }
-    LaunchedEffect(Unit) { }
 }

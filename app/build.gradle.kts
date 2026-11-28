@@ -12,8 +12,8 @@ android {
         applicationId = "com.openband.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "6.8.0"
+        versionCode = 27
+        versionName = "7.1.0"
     }
 
     signingConfigs {
@@ -59,5 +59,9 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.5")
     implementation("androidx.health.connect:connect-client:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // free: lets the phone report walking, running and cycling
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // the library above asks for a very old Fragment version; the screen APIs need a current one
+    implementation("androidx.fragment:fragment:1.8.9")
     testImplementation("junit:junit:4.13.2")
 }

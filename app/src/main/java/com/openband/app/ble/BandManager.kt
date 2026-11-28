@@ -55,6 +55,8 @@ data class CharInfo(val uuid: UUID, val handle: Int, val props: Int) {
 
 data class ServiceInfo(val uuid: UUID, val chars: List<CharInfo>)
 
+data class LiveReading(val kind: LiveKind, val value: Double, val at: Long)
+
 data class BandState(
     val status: String = "Not connected",
     val connected: Boolean = false,
@@ -67,6 +69,11 @@ data class BandState(
     val battery: Int? = null,
     val liveHr: Int? = null,
     val liveKind: LiveKind? = null,
+    /** The latest value of the measurement in progress, and when the band last refused one. */
+    val reading: LiveReading? = null,
+    val refusedAt: Long = 0,
+    /** What the band last reported for its automatic heart-rate measuring. */
+    val hrSetting: HrSetting? = null,
     val protocols: List<String> = emptyList(),
     val info: Map<String, String> = emptyMap(),
     val services: List<ServiceInfo> = emptyList(),
@@ -208,7 +215,7 @@ object BandManager {
             delay(after)
             // every loop checks shouldYield() (= app not visible) and stops at its next step, so this is a few seconds at most
             withTimeoutOrNull(6_000) { while (state.value.syncing) delay(100) }
-            if (foreground || alwaysOn || workoutActive) return@launch
+            if (foreground || alwaysOn || workoutActive || visiting) return@launch
             runCatching { flush(export = false) }
             disconnect(quiet = true)
         }
@@ -241,30 +248,122 @@ object BandManager {
         }
     }
 
+    // ------------------------------------------------------------------ visits from the background
+
+    /** True while a short background visit is in progress. */
+    @Volatile private var visiting = false
+    private val visitMutex = Mutex()
+
+    private val userPrefs get() = com.openband.app.ui.RaceSettings.prefs.value
+
     /**
-     * Background top-up used by [com.openband.app.sync.SyncWorker]: connect, quick sync, let go.
-     * Skipped when the app is open (it is live already) or when a sync ran recently.
+     * May OpenBand talk to the band while it is not on screen? With the Pebble app installed only when the user switched
+     * it on, allowed Usage access, and the Pebble app is not on screen right now.
      */
+    fun backgroundAllowed(): Boolean {
+        if (savedAddress == null || !hasPermissions()) return false
+        if (officialInstalled() && !soloAllowed) {
+            if (!userPrefs.bgBand) return false
+            if (!OfficialApp.usageGranted(ctx) || OfficialApp.inFront(ctx)) return false
+        }
+        return true
+    }
+
+    /**
+     * One short job on the band: join the link (never opening it ahead of the Pebble app), do the work, let go. While the
+     * app is on screen the existing connection is used. Returns null when it was not possible or not allowed.
+     */
+    private suspend fun <T> visit(work: suspend (BandProtocol) -> T): T? = visitMutex.withLock {
+        val inUse = { foreground || workoutActive || alwaysOn }
+        if (!inUse() && !backgroundAllowed()) return@withLock null
+        val dev = savedAddress?.let { adapter?.getRemoteDevice(it) } ?: return@withLock null
+        visiting = true
+        val wake = ctx.getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "openband:visit").apply { acquire(90_000) }
+        try {
+            if (!state.value.ready) {
+                if (gatt == null) {
+                    if (!mayOpenLink(dev)) { log("Visit skipped: the Pebble app has no connection to the band"); return@withLock null }
+                    connectAttempts = 0
+                    ensureConnected()
+                }
+                withTimeoutOrNull(25_000) { while (!state.value.ready) delay(200) } ?: run { log("Visit failed: the band did not become ready"); return@withLock null }
+            }
+            if (otherAppActive()) { log("Visit skipped: the Pebble app is talking to the band"); return@withLock null }
+            val p = protocols.firstOrNull { it.supportsLive } ?: return@withLock null
+            val result = syncMutex.withLock { work(p) }
+            flush(export = false)
+            result
+        } finally {
+            visiting = false
+            runCatching { if (wake.isHeld) wake.release() }
+            if (!inUse()) disconnect(quiet = true)
+        }
+    }
+
+    /** Background top-up: today's readings, or a normal sync when [full]. True if the band was read. */
+    suspend fun backgroundRead(full: Boolean): Boolean {
+        if (foreground) { log("Background read not needed: the app is open"); return false }
+        if (!backgroundAllowed()) {
+            log("Background read skipped: " + when {
+                savedAddress == null -> "no band paired"
+                !hasPermissions() -> "no Bluetooth permission"
+                officialInstalled() && !soloAllowed && !userPrefs.bgBand -> "switched off"
+                officialInstalled() && !soloAllowed && !OfficialApp.usageGranted(ctx) -> "no Usage access"
+                else -> "the Pebble app is on screen"
+            })
+            return false
+        }
+        return visit { p ->
+            if (full) {
+                currentDays = 2
+                for (d in protocols) runCatching { d.sync(io) }.onFailure { log("${d.name} sync: ${it.message}") }
+            } else p.quickRead(io)
+            keepHrInterval(p)
+            if (!io.shouldYield()) {
+                state.update { it.copy(lastSync = System.currentTimeMillis()) }
+                prefs.edit().putLong("last_sync", System.currentTimeMillis()).apply()
+            }
+            true
+        } == true
+    }
+
+    /** Used by [com.openband.app.sync.SyncWorker] when the always-on service is not doing this already. */
     suspend fun backgroundSync() {
-        if (savedAddress == null || !hasPermissions()) return
-        if (foreground) return
-        // With the Pebble app installed OpenBand stays completely silent in the background: nothing it sends can
-        // reach the Pebble app's measure / sync. Data is read (the band keeps 7 days) next time OpenBand is opened.
-        if (officialInstalled() && !soloAllowed && !com.openband.app.ui.RaceSettings.prefs.value.bgBand) return
         if (alwaysOn) { if (state.value.ready) sync() else ensureConnected(); return }
         if (System.currentTimeMillis() - prefs.getLong("last_sync", 0) < 12 * 60_000L) return
-        connectAttempts = 0
-        val dev = adapter?.getRemoteDevice(savedAddress) ?: return
-        if (!mayOpenLink(dev)) return // official app not connected right now: do nothing
-        ensureConnected()
-        // setup() syncs automatically once connected
-        val start = System.currentTimeMillis()
-        val ok = withTimeoutOrNull(150_000) {
-            while (!(state.value.ready && !state.value.syncing && state.value.lastSync > start)) delay(1000)
-            true
-        } != null
-        if (!ok) log("Background sync: band not reachable")
-        if (!foreground && !alwaysOn) { flush(); disconnect(quiet = true) }
+        backgroundRead(full = true)
+    }
+
+    /** The Pebble app writes its own interval when it connects: put the chosen one back. */
+    private suspend fun keepHrInterval(p: BandProtocol) {
+        val want = userPrefs.hrInterval
+        if (want <= 0 || io.shouldYield()) return
+        p.writeHrSetting(io, want)?.let { r -> state.update { it.copy(hrSetting = r) } }
+    }
+
+    /** The user chose an interval: set it on the band now. Returns what the band reports, or null if it could not be reached. */
+    suspend fun setHrInterval(minutes: Int): HrSetting? = visit { p ->
+        p.writeHrSetting(io, minutes)?.also { r -> state.update { it.copy(hrSetting = r) } }
+    }
+
+    suspend fun readHrInterval(): HrSetting? = visit { p ->
+        p.readHrSetting(io)?.also { r -> state.update { it.copy(hrSetting = r) } }
+    }
+
+    /** Makes the band vibrate. Skipped while the band is busy measuring or the Pebble app is on screen. */
+    suspend fun alert(steps: List<com.openband.app.notify.Buzz.Step>): Boolean {
+        if (state.value.liveKind != null && !workoutActive) return false
+        return visit { p ->
+            var ok = true
+            for (step in steps) {
+                if (step.pauseMs > 0) delay(step.pauseMs)
+                // a ringing band is always told to stop
+                if (io.shouldYield() && !com.openband.app.notify.Buzz.stops(step)) { ok = false; continue }
+                ok = (if (step.messageType == null) p.alertFind(io) else p.alertMessage(io, step.messageType, step.label)) && ok
+            }
+            ok
+        } == true
     }
 
     private val prefs get() = ctx.getSharedPreferences("band", Context.MODE_PRIVATE)
@@ -597,7 +696,14 @@ object BandManager {
         override val historyDays: Int get() = currentDays
 
         /** Stop talking to the band the moment OpenBand leaves the screen (unless "always connected"), or the Pebble app is active. */
-        override fun shouldYield() = (!foreground && !alwaysOn && !workoutActive) || otherAppActive()
+        override fun shouldYield() = (!foreground && !alwaysOn && !workoutActive && !visiting) || otherAppActive() ||
+            (visiting && !foreground && officialInstalled() && !soloAllowed && OfficialApp.inFront(ctx))
+
+        override fun liveReading(kind: LiveKind, value: Double) {
+            state.update { it.copy(reading = LiveReading(kind, value, System.currentTimeMillis())) }
+        }
+
+        override fun liveFailed(kind: LiveKind) { state.update { it.copy(refusedAt = System.currentTimeMillis()) } }
 
         override fun foreignTraffic(what: String) {
             val first = !otherAppActive()
@@ -646,6 +752,8 @@ object BandManager {
         state.update { it.copy(protocols = protocols.map { p -> p.name }, ready = true, status = "Connected") }
         if (vendor.isEmpty()) log("No built-in protocol for this band yet - use the Lab tab (snoop import) to teach it")
         for (p in protocols) runCatching { p.onReady(io) }.onFailure { log("${p.name} init: ${it.message}") }
+        // a background visit does its own, smaller piece of work
+        if (visiting && !foreground && !alwaysOn && !workoutActive) return
         sync()
     }
 
@@ -666,6 +774,7 @@ object BandManager {
             currentDays = if (full) 7 else 2
             state.update { it.copy(syncing = true, status = "Syncing…") }
             for (p in protocols) runCatching { p.sync(io) }.onFailure { log("${p.name} sync: ${it.message}") }
+            protocols.firstOrNull { it.supportsLive }?.let { runCatching { keepHrInterval(it) } }
             flush()
             state.update { it.copy(lastSync = System.currentTimeMillis()) }
             prefs.edit().putLong("last_sync", System.currentTimeMillis()).apply()
@@ -704,6 +813,7 @@ object BandManager {
         val p = protocols.firstOrNull { it.supportsLive }
         if (p == null) { log("Live measurement not supported by this protocol (standard HR is shown automatically if the band broadcasts it)"); return@launch }
         if (!(soft && state.value.liveKind == kind)) p.stopLive(io)
+        if (!soft) state.update { it.copy(reading = null, refusedAt = 0) }
         p.startLive(io, kind)
         state.update { it.copy(liveKind = kind) }
     }

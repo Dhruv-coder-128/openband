@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -44,9 +45,10 @@ import java.util.Locale
 /**
  * The always-on "today" notification (like the Pebble app's step counter) and the background refresh behind it.
  *
- * It never talks to the band. Every minute and a half it reads what the Pebble app (or any other app) has written to
- * Health Connect, updates the database, redraws the widgets and refreshes the notification. Optional extras on top:
- * a goal celebration, an evening recap and a "time to move" nudge.
+ * Every minute and a half it reads what the Pebble app (or any other app) has written to Health Connect, updates the
+ * database, redraws the widgets and refreshes the notification. When the user switched on background band reading it
+ * also makes a short visit to the band every few minutes (see BandManager.backgroundAllowed). Optional extras on top:
+ * a goal celebration, evening and weekly recaps, activity questions and a "time to move" nudge.
  */
 class LiveService : Service() {
 
@@ -56,6 +58,12 @@ class LiveService : Service() {
         private const val NOTIF_ID = 2
         private const val REFRESH_MS = 90_000L
         private const val TAG = "LiveService"
+        private const val ACTION_TICK = "com.openband.app.LIVE_TICK"
+        /** How often the band is read in the background, and how often that includes sleep and history. */
+        private const val BAND_MS = 3 * 60_000L
+        private const val BAND_FULL_MS = 30 * 60_000L
+        /** Android may pause the app while the screen is off; an alarm brings it back this often. */
+        private const val TICK_MS = 5 * 60_000L
 
         fun createChannels(ctx: Context) {
             if (Build.VERSION.SDK_INT < 26) return
@@ -88,6 +96,9 @@ class LiveService : Service() {
     private val prefs by lazy { getSharedPreferences("live", Context.MODE_PRIVATE) }
     private var lastText = ""
     private var started = false
+    private val wake = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    @Volatile private var energy: Int? = null
+    private var energyAt = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -118,9 +129,12 @@ class LiveService : Service() {
         try {
             val healthOk = Build.VERSION.SDK_INT >= 34 &&
                 runCatching { packageManager.checkPermission("android.permission.health.READ_STEPS", packageName) == 0 }.getOrDefault(false)
+            // the "connected device" type covers the background band visits
+            val device = if (Build.VERSION.SDK_INT >= 34 && ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) == 0)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
             val type = when {
-                Build.VERSION.SDK_INT >= 34 && healthOk -> ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
-                Build.VERSION.SDK_INT >= 34 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                Build.VERSION.SDK_INT >= 34 && healthOk -> ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or device
+                Build.VERSION.SDK_INT >= 34 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or device
                 else -> 0
             }
             try {
@@ -140,24 +154,37 @@ class LiveService : Service() {
             val repo = HealthRepo(this@LiveService)
             var backoff = 0
             var bandAt = 0L
+            var fullAt = 0L
             while (true) {
                 if (RaceSettings.prefs.value.liveNotif.not()) { stopSelf(); return@launch }
+                // keep the processor on for this round; with the screen off it would otherwise sleep halfway
+                val awake = getSystemService(android.os.PowerManager::class.java)
+                    .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "openband:refresh").apply { acquire(120_000) }
                 try {
                     withContext(Dispatchers.IO) { repo.import(quick = true) }
                     backoff = 0
                 } catch (e: Throwable) {
                     Log.w(TAG, "refresh failed", e); backoff = (backoff + 1).coerceAtMost(5)
                 }
-                // opt-in: a short, read-only visit to the band (only joins the Pebble app's own link)
+                // opt-in: a short visit to the band (only joins the Pebble app's own link)
                 val p = RaceSettings.prefs.value
-                if (p.bgBand && System.currentTimeMillis() - bandAt > 10 * 60_000L) {
-                    bandAt = System.currentTimeMillis()
-                    runCatching { BandManager.backgroundSync() }
+                val now = System.currentTimeMillis()
+                if ((p.bgBand || !BandManager.officialInstalled()) && now - bandAt >= BAND_MS - 5_000) {
+                    val full = now - fullAt >= BAND_FULL_MS
+                    val read = runCatching { BandManager.backgroundRead(full) }.getOrDefault(false)
+                    Log.i(TAG, "band visit (full=$full): " + if (read) "read" else "skipped")
+                    bandAt = now
+                    if (read && full) fullAt = now
                 }
+                runCatching { withContext(Dispatchers.IO) { com.openband.app.detect.Detected.check(this@LiveService) } }
+                runCatching { withContext(Dispatchers.IO) { RecapAlert.check(this@LiveService) } }
+                runCatching { withContext(Dispatchers.IO) { refreshEnergy() } }
                 runCatching { withContext(Dispatchers.IO) { logSources() } }
                 runCatching { withContext(Dispatchers.IO) { WidgetUpdater.updateAll(this@LiveService) } }
                 update()
-                delay(REFRESH_MS * (1 + backoff))
+                tickLater()
+                runCatching { if (awake.isHeld) awake.release() }
+                withTimeoutOrNull(REFRESH_MS * (1 + backoff)) { wake.receive() }
             }
         }
         // 2) any new data (band, import, workout) refreshes straight away
@@ -205,7 +232,26 @@ class LiveService : Service() {
         if (s.distM >= 50) {
             parts += if (p.imperial) "%.2f mi".format(s.distM / 1609.344) else "%.2f km".format(s.distM / 1000.0)
         }
+        energy?.let { parts.add(1.coerceAtMost(parts.size), "Energy $it") }
         return build("%,d steps".format(s.steps), parts.joinToString(" · "), s.steps, p.stepGoal)
+    }
+
+    /** Worked out at most every five minutes: it looks back over weeks of nights. */
+    private fun refreshEnergy() {
+        if (System.currentTimeMillis() - energyAt < 5 * 60_000L) return
+        energyAt = System.currentTimeMillis()
+        val p = RaceSettings.prefs.value
+        energy = runCatching { com.openband.app.data.BodyEnergy.today(Db.get(this), p.sleepGoalMin, p.maxHr)?.now }.getOrNull()
+    }
+
+    private fun tickLater() {
+        runCatching {
+            val pi = PendingIntent.getForegroundService(
+                this, 30, Intent(this, LiveService::class.java).setAction(ACTION_TICK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            getSystemService(android.app.AlarmManager::class.java)
+                .setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, android.os.SystemClock.elapsedRealtime() + TICK_MS, pi)
+        }.onFailure { Log.w(TAG, "alarm", it) }
     }
 
     private fun update() {
@@ -292,6 +338,7 @@ class LiveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!started) { stopSelf(); return START_NOT_STICKY }
+        if (intent?.action == ACTION_TICK) wake.trySend(Unit)
         return START_STICKY
     }
 

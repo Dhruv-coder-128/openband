@@ -46,6 +46,8 @@ class QRingProtocol : BandProtocol {
         const val CMD_LIVE_START = 105
         const val CMD_LIVE_STOP = 106
         const val CMD_DEVICE_NOTIFY = 115
+        const val CMD_FIND_DEVICE = 80
+        const val CMD_PUSH_MSG = 114
 
         // big-data channel (LargeDataHandler.ACTION_*)
         const val BIG_SLEEP = 39
@@ -148,11 +150,14 @@ class QRingProtocol : BandProtocol {
                         val v = value.u8(3)
                         if (type == 6) { rt6n++; if (rt6n <= 4 || rt6n % 30 == 0) io.log("realtime HR #$rt6n: ${value.hex()}") }
                         if (v > 0) when (type) {
-                            1, 6 -> if (v in 25..250) { io.setLiveHr(v); io.emit(M.HR, v.toDouble()) }
-                            3 -> if (v in 70..100) io.emit(M.SPO2, v.toDouble())
-                            10 -> if (v in 1..250) io.emit(M.HRV, v.toDouble())
-                            8 -> if (v in 1..100) io.emit(M.STRESS, v.toDouble())
+                            1, 6 -> if (v in 25..250) { io.setLiveHr(v); io.emit(M.HR, v.toDouble()); if (type == 1) io.liveReading(LiveKind.HEART_RATE, v.toDouble()) }
+                            3 -> if (v in 70..100) { io.emit(M.SPO2, v.toDouble()); io.liveReading(LiveKind.SPO2, v.toDouble()) }
+                            10 -> if (v in 1..250) { io.emit(M.HRV, v.toDouble()); io.liveReading(LiveKind.HRV, v.toDouble()) }
+                            8 -> if (v in 1..100) { io.emit(M.STRESS, v.toDouble()); io.liveReading(LiveKind.STRESS, v.toDouble()) }
                         }
+                    } else if (value.size >= 4 && value.u8(1) == liveType) {
+                        io.log("measurement refused: ${value.hex()}")
+                        kindOf(liveType)?.let { io.liveFailed(it) }
                     }
                     CMD_BATTERY -> if (value.size >= 2) io.setBattery(value.u8(1))
                 }
@@ -213,6 +218,53 @@ class QRingProtocol : BandProtocol {
             lastBatteryPoll = System.currentTimeMillis()
             request(io, packet(CMD_BATTERY)) { _, _ -> true }.firstOrNull()?.let { if (it.size >= 2) io.setBattery(it.u8(1)) }
         }
+    }
+
+    // ------------------------------------------------------------------ background, settings, alerts
+
+    override suspend fun quickRead(io: BandIo) {
+        request(io, packet(CMD_BATTERY), 2500) { _, _ -> true }.firstOrNull()?.let { if (it.size >= 2) io.setBattery(it.u8(1)) }
+        val steps: List<suspend () -> Unit> = listOf(
+            { syncSteps(io, 0) },
+            { syncHeartLog(io, LocalDate.now()) },
+            { syncHalfHourly(io, CMD_HRV, 0, M.HRV, 1..250) },
+            { syncHalfHourly(io, CMD_STRESS, 0, M.STRESS, 1..100) },
+            { if (io.hasChar(BIG_WRITE)) syncInterval(io, BIG_SPO2_INTERVAL, 0, M.SPO2) },
+            { if (io.hasChar(BIG_WRITE)) syncTempSeries(io, 0) },
+        )
+        for (step in steps) {
+            if (io.shouldYield()) return
+            runCatching { step() }.onFailure { io.log("quick read: ${it.message}") }
+        }
+    }
+
+    /** HeartRateSettingReq: read [22, 1]; the reply is [22, 1, on(1)/off(2), minutes, …]. */
+    override suspend fun readHrSetting(io: BandIo): HrSetting? {
+        val r = request(io, packet(CMD_HR_SETTING, 1), 3000) { p, _ -> p.u8(1) == 1 }.lastOrNull { it.u8(1) == 1 } ?: return null
+        io.log("HR setting: ${r.hex()}")
+        return HrSetting(r.u8(2) == 1, r.u8(3), listOf(r.u8(4), r.u8(5), r.u8(6)))
+    }
+
+    /** Write [22, 2, on, minutes, …]. Writes only when something differs, then reads back to confirm. */
+    override suspend fun writeHrSetting(io: BandIo, minutes: Int): HrSetting? {
+        val now = readHrSetting(io) ?: return null
+        if (now.enabled && now.minutes == minutes) return now
+        if (io.shouldYield()) return null
+        request(io, packet(CMD_HR_SETTING, 2, 1, minutes, now.extra.getOrElse(0) { 0 }, now.extra.getOrElse(1) { 0 }, now.extra.getOrElse(2) { 0 }), 3000) { _, _ -> true }
+        return readHrSetting(io)
+    }
+
+    /** PushMsgUintReq: [114, type, packets, index, up to 11 bytes of text]. */
+    override suspend fun alertMessage(io: BandIo, type: Int, label: String): Boolean {
+        val text = label.toByteArray().take(11).map { it.toInt() and 0xff }.toIntArray()
+        sentAt[CMD_PUSH_MSG] = System.currentTimeMillis()
+        return io.write(WRITE, packet(CMD_PUSH_MSG, type, 1, 1, *text))
+    }
+
+    /** FindDeviceReq: [80, 0x55, 0xAA]. */
+    override suspend fun alertFind(io: BandIo): Boolean {
+        sentAt[CMD_FIND_DEVICE] = System.currentTimeMillis()
+        return io.write(WRITE, packet(CMD_FIND_DEVICE, 0x55, 0xAA))
     }
 
     // ------------------------------------------------------------------ command channel
@@ -302,6 +354,10 @@ class QRingProtocol : BandProtocol {
         var n = 0
         values.forEachIndexed { i, v ->
             if (v in 30..230) { io.emit(M.HR, v.toDouble(), midnight + i.toLong() * range * 60_000); n++ }
+        }
+        if (date == LocalDate.now()) {
+            val slots = values.indices.filter { values[it] in 30..230 }.takeLast(8).joinToString { "%02d:%02d".format(it * range / 60, it * range % 60) }
+            io.log("HR measured by the band today at: $slots")
         }
         return n
     }
@@ -491,6 +547,8 @@ class QRingProtocol : BandProtocol {
     // ------------------------------------------------------------------ live
 
     override val supportsLive = true
+
+    private fun kindOf(type: Int) = when (type) { 1 -> LiveKind.HEART_RATE; 3 -> LiveKind.SPO2; 8 -> LiveKind.STRESS; 10 -> LiveKind.HRV; else -> null }
 
     override suspend fun startLive(io: BandIo, kind: LiveKind) {
         liveType = when (kind) {

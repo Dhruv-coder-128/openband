@@ -61,7 +61,7 @@ fun HistoryScreen(modifier: Modifier) {
         ScreenTitle(LocalRace.current.names.history, "Your history, day by day")
         val open = LocalOpenMetric.current
         SectionCard(null) {
-            LinkRow(AppIcons.Trends, LocalRace.current.primary, "Weekly and monthly report", "Totals, averages and what changed", null) { open("page:report") }
+            LinkRow(AppIcons.Trends, LocalRace.current.primary, "Weekly and monthly story", "Your week or month, card by card", null) { open("page:report") }
             LinkRow(AppIcons.Heart, LocalRace.current.primary, "Recovery", "Readiness score and its last 14 days", null) { open("page:recovery") }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
